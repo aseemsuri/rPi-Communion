@@ -52,6 +52,7 @@ python /home/pi/communion-project/python/communion_python_cl1.py
 - make 1 work
 - make 3 work
 - make 12 work
+- remove rnbo
 - make jack automatic
 - make scripts automatic
 [Add your run instructions here]
