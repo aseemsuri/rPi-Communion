@@ -23,6 +23,9 @@ pip install -r python/requirements.txt
 ### SuperCollider
 Scripts are in the \`supercollider/\` directory. Audio samples in \`supercollider/samples/\`.
 
+# run headless:
+QT_QPA_PLATFORM=offscreen QT_XCB_GL_INTEGRATION=none LIBGL_ALWAYS_SOFTWARE=1 sclang /home/pi/sc/communion_sc_cl3.scd
+
 ## Components
 
 ### Run Jack first
@@ -34,6 +37,10 @@ jackd -d alsa -d hw:3,0 -r 44100 -p 256 -n 2
 ### Python Scripts
 - \`communion_python_cl1.py\` - Main Python controller
 - \`mpr121_osc_sender.py\` - MPR121 sensor OSC sender
+
+# commands:
+python /home/pi/communion-project/python/communion_python_cl1.py
+
 
 ### SuperCollider Scripts
 - \`communion_sc_cl*.scd\` - Main SuperCollider patches
