@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+.pytest_cache/
+
+# Audio files (large samples)
+*.wav
+*.aif
+*.aiff
+*.mp3
+*.flac
+
+# SuperCollider
+*.sc_history
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+.env
+*.local
