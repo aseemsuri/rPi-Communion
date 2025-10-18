@@ -12,7 +12,7 @@
 
 ~touchOnThresh = [
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-    1.0, 1.0, 1.0, 3.0, 1.0, 1.0
+    1.0, 1.0, 1.0, 3.0, 1.0, 3.0
 ];
 
 ~touchOffThresh = [
@@ -22,7 +22,7 @@
 
 ~touchDeltaMin = [
     0.6, 0.6, 0.6, 0.6, 0.6, 0.6,
-    0.6, 0.6, 0.6, 3.0, 0.6, 0.6  // Lowered touch9 from 2.0 to 0.8
+    0.6, 0.6, 0.6, 3.0, 0.6, 3.0  // Lowered touch9 from 2.0 to 0.8
 ];
 
 ~samplePaths = [
@@ -37,7 +37,7 @@
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/kick.wav",          // touch10 = flowerPlant
-    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/strings.wav",      // touch11 = stringsPlant
 ];
 
 ~baseNote = 24;
@@ -66,9 +66,9 @@ s.waitForBoot({
     // OSCFunc({ |msg, time, addr, recvPort|
     //     ("OSC received: " ++ msg).postln;
     // }, nil);  // nil means listen to all OSC paths
-    
-    
-    
+
+
+
     // ---- LOAD SAMPLES ----
     ~buffers = ();
     ~samplePaths.do({ |path, i|
@@ -124,6 +124,14 @@ s.waitForBoot({
     SynthDef(\warmer, { |out=0, amp=0.05|
         var sig = SinOsc.ar(440, 0, amp);
         Out.ar(out, sig ! 2);
+    }).add;
+
+    // Strings Plant synth - for chord building (root, third, fifth, octave)
+    SynthDef(\stringsPlant, { |bufnum, amp=0.6, rate=1, gate=1, out=0, atk=0.05, rel=0.8|
+        var rateScale = BufRateScale.kr(bufnum) * rate;
+        var src = PlayBuf.ar(1, bufnum, rateScale, startPos: 0, loop: 0);
+        var eg = EnvGen.kr(Env.asr(atk, 1.0, rel), gate, doneAction: 2);
+        Out.ar(out, (src * eg * amp) ! 2);
     }).add;
 
     s.sync;
@@ -361,6 +369,122 @@ s.waitForBoot({
         }, oscPath, recvPort: NetAddr.langPort);
     };
 
+    // Strings Plant handler (touch11) - chord building based on pressure
+    ~makeStringsPlantHandler = { |touchKey, bufIndex, bufferObj, oscPath, index|
+        var onThresh = ~touchOnThresh[index];
+        var offThresh = ~touchOffThresh[index];
+
+        var ema = 0.0;
+        var rootSynth = nil;
+        var thirdSynth = nil;
+        var fifthSynth = nil;
+        var octaveSynth = nil;
+        var rootPlaying = false;
+        var thirdPlaying = false;
+        var fifthPlaying = false;
+        var octavePlaying = false;
+
+        // Thresholds for adding notes
+        var rootThresh = 1.0;     // Root plays immediately on touch
+        var thirdThresh = 25.0;   // Third added at 25%
+        var fifthThresh = 50.0;   // Fifth added at 50%
+        var octaveThresh = 75.0;  // Octave added at 75%
+
+        OSCdef(touchKey, { |msg|
+            var raw;
+            raw = (msg.size > 1 and: { msg[1].isNumber })
+                .if({ msg[1].asFloat }, { 0.0 });
+
+            ema = (~emaAlpha * raw) + ((1 - ~emaAlpha) * ema);
+
+            // Add root note when touch starts
+            if ((ema > rootThresh) and: rootPlaying.not) {
+                rootPlaying = true;
+                // Free old synth if it exists
+                if (rootSynth.notNil) { rootSynth.free };
+                rootSynth = Synth(\stringsPlant, [
+                    \bufnum, bufferObj.bufnum,
+                    \amp, 0.6,
+                    \rate, 1.0,  // Root note (0 semitones)
+                    \atk, 0.05,
+                    \rel, 0.8
+                ]);
+                rootSynth.onFree({ rootSynth = nil; rootPlaying = false });
+                (">>> " ++ touchKey ++ " ROOT added (ema=%)".format(ema.round(0.1))).postln;
+            };
+
+            // Add third when pressure increases
+            if ((ema > thirdThresh) and: thirdPlaying.not and: rootPlaying) {
+                thirdPlaying = true;
+                // Free old synth if it exists
+                if (thirdSynth.notNil) { thirdSynth.free };
+                thirdSynth = Synth(\stringsPlant, [
+                    \bufnum, bufferObj.bufnum,
+                    \amp, 0.5,
+                    \rate, 4.midiratio,  // Major third (4 semitones)
+                    \atk, 0.05,
+                    \rel, 0.8
+                ]);
+                thirdSynth.onFree({ thirdSynth = nil; thirdPlaying = false });
+                (">>> " ++ touchKey ++ " THIRD added (ema=%)".format(ema.round(0.1))).postln;
+            };
+
+            // Add fifth when pressure increases more
+            if ((ema > fifthThresh) and: fifthPlaying.not and: thirdPlaying) {
+                fifthPlaying = true;
+                // Free old synth if it exists
+                if (fifthSynth.notNil) { fifthSynth.free };
+                fifthSynth = Synth(\stringsPlant, [
+                    \bufnum, bufferObj.bufnum,
+                    \amp, 0.5,
+                    \rate, 7.midiratio,  // Perfect fifth (7 semitones)
+                    \atk, 0.05,
+                    \rel, 0.8
+                ]);
+                fifthSynth.onFree({ fifthSynth = nil; fifthPlaying = false });
+                (">>> " ++ touchKey ++ " FIFTH added (ema=%)".format(ema.round(0.1))).postln;
+            };
+
+            // Add octave at maximum pressure
+            if ((ema > octaveThresh) and: octavePlaying.not and: fifthPlaying) {
+                octavePlaying = true;
+                // Free old synth if it exists
+                if (octaveSynth.notNil) { octaveSynth.free };
+                octaveSynth = Synth(\stringsPlant, [
+                    \bufnum, bufferObj.bufnum,
+                    \amp, 0.4,
+                    \rate, 12.midiratio,  // Octave (12 semitones)
+                    \atk, 0.05,
+                    \rel, 0.8
+                ]);
+                octaveSynth.onFree({ octaveSynth = nil; octavePlaying = false });
+                (">>> " ++ touchKey ++ " OCTAVE added (ema=%)".format(ema.round(0.1))).postln;
+            };
+
+            // Release all notes when hand lifts
+            if (ema < offThresh) {
+                if (rootPlaying) {
+                    if (rootSynth.notNil) { rootSynth.set(\gate, 0) };
+                    rootPlaying = false;
+                };
+                if (thirdPlaying) {
+                    if (thirdSynth.notNil) { thirdSynth.set(\gate, 0) };
+                    thirdPlaying = false;
+                };
+                if (fifthPlaying) {
+                    if (fifthSynth.notNil) { fifthSynth.set(\gate, 0) };
+                    fifthPlaying = false;
+                };
+                if (octavePlaying) {
+                    if (octaveSynth.notNil) { octaveSynth.set(\gate, 0) };
+                    octavePlaying = false;
+                };
+                ema = 0.0;
+//                ("<<< " ++ touchKey ++ " ALL RELEASED").postln;
+            };
+        }, oscPath, recvPort: NetAddr.langPort);
+    };
+
     // ---- REGISTER TOUCH HANDLERS ----
     12.do({ |i|
         var touchKey = ("touch" ++ i).asSymbol;
@@ -378,13 +502,27 @@ s.waitForBoot({
                     touchKey, i, ~buffers[i], oscPath, i
                 );
             } {
-                // All others = Basic sampler
-                ~makeBasicHandler.(
-                    touchKey, i, ~buffers[i], oscPath, i
-                );
+                if (i == 11) {
+                    // Touch11 = Strings Plant with chord building
+                    ~makeStringsPlantHandler.(
+                        touchKey, i, ~buffers[i], oscPath, i
+                    );
+                } {
+                    // All others = Basic sampler
+                    ~makeBasicHandler.(
+                        touchKey, i, ~buffers[i], oscPath, i
+                    );
+                };
             };
         };
     });
+
+    // Wait for server to fully stabilize before creating warmer synth
+    s.sync;
+
+    // Explicitly recreate default group in case server reconnected
+    s.initTree;
+    s.sync;
 
     // Start the warmer synth
     ~warmerSynth = Synth(\warmer, [\amp, 0.001]);

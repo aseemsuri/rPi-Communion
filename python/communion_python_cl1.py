@@ -7,7 +7,7 @@ from pythonosc.udp_client import SimpleUDPClient
 # ---- CALIBRATION ----
 # Adjust these per sensor based on idle vs touched readings
 RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]      # Expected minimum raw value when touched
-RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 100]  # Idle values
+RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]  # Idle values
 
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
@@ -55,13 +55,52 @@ def apply_spike_filter(new_value, prev_value, max_delta):
     return new_value
 
 
+def calibrate_sensors(duration=3.0, buffer=3):
+    """
+    Calibrate sensors by finding minimum values over duration seconds.
+    Returns calibrated RAW_MAX array.
+    """
+    print(f"\n=== CALIBRATION MODE ===")
+    print(f"Sampling sensors for {duration} seconds...")
+    print("Please keep hands OFF all sensors!\n")
+
+    # Track minimum values for each sensor
+    min_values = [float('inf')] * 12
+
+    start_time = time.time()
+    sample_count = 0
+
+    while (time.time() - start_time) < duration:
+        for i in range(12):
+            raw_value = mpr121.filtered_data(i)
+            if raw_value < min_values[i]:
+                min_values[i] = raw_value
+
+        sample_count += 1
+        time.sleep(0.01)  # 10ms sampling
+
+    # Calculate calibrated RAW_MAX values (min - buffer)
+    calibrated_max = [max(int(min_val - buffer), 0) for min_val in min_values]
+
+    print(f"Calibration complete! ({sample_count} samples)\n")
+    print("Detected minimum values per sensor:")
+    for i in range(12):
+        print(f"  touch{i}: min={int(min_values[i])}, calibrated_max={calibrated_max[i]}")
+
+    return calibrated_max
+
+
 try:
     print(f"OSC Client ready: {osc_ip}:{osc_port}")
-    print("Polling MPR121... Press Ctrl+C to exit.\n")
+
+    # Run calibration
+    RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
+
+    print("\nStarting main loop... Press Ctrl+C to exit.\n")
     
     while True:
         # Poll all 12 channels
-        for i in range(9,11):
+        for i in range(9,12):
             raw_value = mpr121.filtered_data(i)
 #            print(f"Pad{i}: {raw_value}")
             # Map raw sensor value to 0-100 range
