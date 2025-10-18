@@ -7,12 +7,12 @@ from pythonosc.udp_client import SimpleUDPClient
 # ---- CALIBRATION ----
 # Adjust these per sensor based on idle vs touched readings
 RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]      # Expected minimum raw value when touched
-RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 68, 83, 100]  # Idle values
+RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 100]  # Idle values
 
 # ---- SMOOTHING & FILTERING ----
-SMOOTHING_ALPHA = 0.8
-MAX_DELTA = 30
-POLL_INTERVAL = 0.1  # 50ms polling
+SMOOTHING_ALPHA = 0.4
+MAX_DELTA = 10
+POLL_INTERVAL = 0.01  # 10ms polling
 
 # ---- SETUP I2C + MPR121 ----
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -21,7 +21,7 @@ mpr121 = adafruit_mpr121.MPR121(i2c)
 # Configure thresholds for stability
 for i in range(12):
     mpr121[i].threshold = 100        # Higher = less sensitive
-    mpr121[i].release_threshold = 10
+    mpr121[i].release_threshold = 40
 
 smoothed_values = [0.0] * 12
 
@@ -80,7 +80,7 @@ try:
             client.send_message(osc_path, smoothed_values[i])
             
             # Debug output (optional: comment out for cleaner output)
-            print(f"Pad {i}: raw={raw_value:3d} → mapped={raw_mapped:6.2f} → smoothed={smoothed_values[i]:6.2f} → oscPath={osc_path}")
+#            print(f"Pad {i}: raw={raw_value:3d} → mapped={raw_mapped:6.2f} → smoothed={smoothed_values[i]:6.2f} → oscPath={osc_path}")
         
         time.sleep(POLL_INTERVAL)
 

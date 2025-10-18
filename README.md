@@ -33,6 +33,7 @@ QT_QPA_PLATFORM=offscreen QT_XCB_GL_INTEGRATION=none LIBGL_ALWAYS_SOFTWARE=1 scl
 aplay -l
 # run jack on correct hw: number
 jackd -d alsa -d hw:3,0 -r 44100 -p 256 -n 2
+jackd -d alsa -d hw:Audio -r 44100 -p 256 -n 2
 
 ### Python Scripts
 - \`communion_python_cl1.py\` - Main Python controller
@@ -40,7 +41,7 @@ jackd -d alsa -d hw:3,0 -r 44100 -p 256 -n 2
 
 # commands:
 python /home/pi/communion-project/python/communion_python_cl1.py
-
+/home/pi/communion-project/supercollider/run_communion.sh
 
 ### SuperCollider Scripts
 - \`communion_sc_cl*.scd\` - Main SuperCollider patches
