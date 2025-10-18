@@ -61,7 +61,7 @@ try:
     
     while True:
         # Poll all 12 channels
-        for i in range(9,10):
+        for i in range(9,11):
             raw_value = mpr121.filtered_data(i)
 #            print(f"Pad{i}: {raw_value}")
             # Map raw sensor value to 0-100 range

@@ -26,18 +26,18 @@
 ];
 
 ~samplePaths = [
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav",
-    "/home/pi/sc/moneyPlant.wav"
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/kick.wav",          // touch10 = flowerPlant
+    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
 ];
 
 ~baseNote = 24;
@@ -89,9 +89,17 @@ s.waitForBoot({
     
     // Money Plant synth with pentatonic pitching
     ~majorPentatonic = [0, 2, 4, 7, 9, 12];
-    
+
     ~getRandomPentatonicNote = { |v|
         var interval = ~majorPentatonic.choose;
+        v + interval;
+    };
+
+    // Flower Plant pitch options: fa down, sol down, root, fa, sol
+    ~flowerPlantPitches = [-7, -5, 0, 5, 7];
+
+    ~getRandomFlowerPlantNote = { |v|
+        var interval = ~flowerPlantPitches.choose;
         v + interval;
     };
     
@@ -100,6 +108,14 @@ s.waitForBoot({
         var vibLfo = SinOsc.kr(5, 0, vibrato * 0.05);  // 5Hz vibrato, max 5% rate variation
         var vibratingRate = rateScale * (1.0 + vibLfo);
         var src = PlayBuf.ar(1, bufnum, vibratingRate, gate, startPos: 0, loop: 0);
+        var eg = EnvGen.kr(Env.asr(atk, 1.0, rel), gate, doneAction: 2);
+        Out.ar(out, (src * eg * amp) ! 2);
+    }).add;
+
+    // Flower Plant synth - kick with pitch shifting, no vibrato
+    SynthDef(\flowerPlant, { |bufnum, amp=0.9, rate=1, gate=1, out=0, atk=0.001, rel=0.015|
+        var rateScale = BufRateScale.kr(bufnum) * rate;
+        var src = PlayBuf.ar(1, bufnum, rateScale, startPos: 0, loop: 0);
         var eg = EnvGen.kr(Env.asr(atk, 1.0, rel), gate, doneAction: 2);
         Out.ar(out, (src * eg * amp) ! 2);
     }).add;
@@ -196,15 +212,12 @@ s.waitForBoot({
         var onThresh = ~touchOnThresh[index];
         var offThresh = ~touchOffThresh[index];
         var deltaMin = ~touchDeltaMin[index];
-        //var emaAlpha = 0.2;
 
         var ema = 0.0;
         var lastEma = 0.0;
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
-        //var lastTriggerTime = 0;
-        //var debounceTime = 0.01;  // 300ms minimum between triggers
 
         var ampMap = { |v|
             0.9  // Fixed amplitude (not touch-sensitive)
@@ -217,7 +230,6 @@ s.waitForBoot({
         OSCdef(touchKey, { |msg|
 
             var raw, risingEdge, fallingEdge, rate, potentialRisingEdge;
-            // (msg).postln;
             raw = (msg.size > 1 and: { msg[1].isNumber })
                 .if({ msg[1].asFloat }, { 0.0 });
 
@@ -261,16 +273,87 @@ s.waitForBoot({
                         ampMap.(ema).round(0.01)
                     )).postln;
             };
-            
+
             if (pressed and: synth.notNil and: { synth.isPlaying }) {
                 synth.set(\vibrato, vibratoMap.(ema));
             };
-            
+
             if (pressed and: fallingEdge) {
                 pressed = false;
                 ema = 0.0;  // Reset EMA so next touch starts fresh
 
-                // Release the synth (but don't free it)
+                synth.set(\gate, 0);
+
+                ("<<< " ++ touchKey ++ " RELEASE").postln;
+            };
+        }, oscPath, recvPort: NetAddr.langPort);
+    };
+
+    // Flower Plant handler (touch10) - kick with fa/sol pitching, no vibrato
+    ~makeFlowerPlantHandler = { |touchKey, bufIndex, bufferObj, oscPath, index|
+        var onThresh = ~touchOnThresh[index];
+        var offThresh = ~touchOffThresh[index];
+        var deltaMin = ~touchDeltaMin[index];
+
+        var ema = 0.0;
+        var lastEma = 0.0;
+        var pressed = false;
+        var synth = nil;
+        var currentNote = 36;
+
+        var ampMap = { |v|
+            0.9  // Fixed amplitude (not touch-sensitive)
+        };
+
+        OSCdef(touchKey, { |msg|
+
+            var raw, risingEdge, fallingEdge, rate, potentialRisingEdge;
+            raw = (msg.size > 1 and: { msg[1].isNumber })
+                .if({ msg[1].asFloat }, { 0.0 });
+
+            lastEma = ema;
+
+            // Check for rising edge using raw value (before smoothing)
+            potentialRisingEdge = (raw > onThresh) and: ((raw - ema) > deltaMin) and: pressed.not;
+
+            // If rising edge detected, jump EMA to raw value for instant response
+            if (potentialRisingEdge) {
+                ema = raw;
+            } {
+                ema = (~emaAlpha * raw) + ((1 - ~emaAlpha) * ema);
+            };
+
+            risingEdge = potentialRisingEdge;
+            fallingEdge = (ema < offThresh);
+
+            if (risingEdge and: pressed.not) {
+                pressed = true;
+                currentNote = ~getRandomFlowerPlantNote.(~baseNote);
+                rate = (currentNote - ~baseNote).midiratio;
+
+                if (synth.notNil) { synth.free };
+
+                synth = Synth(\flowerPlant, [
+                    \bufnum, bufferObj.bufnum,
+                    \amp, 0.9,
+                    \rate, rate,
+                    \atk, 0.001,
+                    \rel, 0.015
+                ]);
+
+                synth.onFree({ synth = nil });
+
+                (">>> " ++ touchKey ++ " TRIGGER: note=%, rate=%"
+                    .format(
+                        currentNote,
+                        rate.round(0.001)
+                    )).postln;
+            };
+
+            if (pressed and: fallingEdge) {
+                pressed = false;
+                ema = 0.0;  // Reset EMA so next touch starts fresh
+
                 synth.set(\gate, 0);
 
                 ("<<< " ++ touchKey ++ " RELEASE").postln;
@@ -289,10 +372,17 @@ s.waitForBoot({
                 touchKey, i, ~buffers[i], oscPath, i
             );
         } {
-            // All others = Basic sampler
-            ~makeBasicHandler.(
-                touchKey, i, ~buffers[i], oscPath, i
-            );
+            if (i == 10) {
+                // Touch10 = Flower Plant with fa/sol pitching
+                ~makeFlowerPlantHandler.(
+                    touchKey, i, ~buffers[i], oscPath, i
+                );
+            } {
+                // All others = Basic sampler
+                ~makeBasicHandler.(
+                    touchKey, i, ~buffers[i], oscPath, i
+                );
+            };
         };
     });
 
