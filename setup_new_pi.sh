@@ -61,7 +61,18 @@ if [ ! -f ~/.jackdrc ]; then
 fi
 
 echo ""
-echo "Step 7: Setting permissions for audio..."
+echo "Step 7: Fixing USB audio card to always be hw:3..."
+sudo tee /etc/modprobe.d/alsa-base.conf > /dev/null <<EOF
+# Force specific card order
+options snd_usb_audio index=3
+options snd_rpi_hifiberry_dac index=1
+options vc4 index=2
+options snd_dummy index=0
+EOF
+echo "Audio card order fixed (USB will be hw:3)"
+
+echo ""
+echo "Step 8: Setting permissions for audio..."
 sudo usermod -a -G audio $USER
 
 echo ""
