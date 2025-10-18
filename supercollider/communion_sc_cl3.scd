@@ -12,7 +12,7 @@
 
 ~touchOnThresh = [
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-    1.0, 1.0, 1.0, 2.0, 1.0, 1.0
+    1.0, 1.0, 1.0, 3.0, 1.0, 1.0
 ];
 
 ~touchOffThresh = [
@@ -22,7 +22,7 @@
 
 ~touchDeltaMin = [
     0.6, 0.6, 0.6, 0.6, 0.6, 0.6,
-    0.6, 0.6, 0.6, 1.2, 0.6, 0.6  // Lowered touch9 from 2.0 to 0.8
+    0.6, 0.6, 0.6, 3.0, 0.6, 0.6  // Lowered touch9 from 2.0 to 0.8
 ];
 
 ~samplePaths = [
@@ -102,6 +102,12 @@ s.waitForBoot({
         var src = PlayBuf.ar(1, bufnum, vibratingRate, gate, startPos: 0, loop: 0);
         var eg = EnvGen.kr(Env.asr(atk, 1.0, rel), gate, doneAction: 2);
         Out.ar(out, (src * eg * amp) ! 2);
+    }).add;
+
+    // Warmer synth - simple sine wave at 440Hz
+    SynthDef(\warmer, { |out=0, amp=0.05|
+        var sig = SinOsc.ar(440, 0, amp);
+        Out.ar(out, sig ! 2);
     }).add;
 
     s.sync;
@@ -289,6 +295,9 @@ s.waitForBoot({
             );
         };
     });
+
+    // Start the warmer synth
+    ~warmerSynth = Synth(\warmer, [\amp, 0.001]);
 
     "✓ Ready! Listening on /touch0 through /touch11".postln;
 });
