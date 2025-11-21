@@ -11,9 +11,9 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-# Run SuperCollider
+# Run SuperCollider with xvfb (virtual framebuffer for headless operation)
 cd /home/pi/communion-project
-QT_QPA_PLATFORM=offscreen QT_XCB_GL_INTEGRATION=none LIBGL_ALWAYS_SOFTWARE=1 sclang supercollider/communion_sc_cl3.scd
+xvfb-run -a sclang supercollider/communion_sc_cl3.scd
 
 # If sclang exits normally, still cleanup
 cleanup
