@@ -32,7 +32,8 @@ sudo apt install -y \
     python3-pip \
     python3-venv \
     i2c-tools \
-    libasound2-dev
+    libasound2-dev \
+    xvfb
 
 echo ""
 echo "Step 3: Enabling I2C interface..."
