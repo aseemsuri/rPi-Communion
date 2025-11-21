@@ -73,6 +73,16 @@ EOF
 echo "Audio card order fixed (USB will be hw:3)"
 
 echo ""
+echo "Step 9: Setting audio interface volume to 86%..."
+# Set the volume for the USB audio card (card 3)
+amixer -c 3 set PCM 86%
+amixer -c 3 set Speaker 86% 2>/dev/null || true
+amixer -c 3 set Headphone 86% 2>/dev/null || true
+
+# Save the settings
+sudo alsactl store
+
+echo ""
 echo "Step 8: Setting permissions for audio..."
 sudo usermod -a -G audio $USER
 
