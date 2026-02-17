@@ -369,6 +369,10 @@ try:
                     # Map raw sensor value to 0-100 range
                     raw_mapped = map_touch_value(raw_value, RAW_MIN[i], RAW_MAX[i])
 
+                    # Debug output for sensor 10
+                    if i == 10 and raw_mapped > 5:  # Only when there's some output
+                        print(f"DEBUG sensor_10: raw={raw_value}, min={RAW_MIN[i]}, max={RAW_MAX[i]}, output={raw_mapped:.1f}")
+
                     # Spike filter
                     # raw_mapped = apply_spike_filter(raw_mapped, smoothed_values[i], MAX_DELTA)
 
