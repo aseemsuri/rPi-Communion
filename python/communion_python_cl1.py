@@ -44,12 +44,16 @@ def load_config():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.load(f)
 
-            # Load min/max values for each sensor
+            # Load thresholds for each sensor
             for i in range(12):
                 sensor_key = f"sensor_{i}"
                 if sensor_key in config:
-                    RAW_MIN[i] = config[sensor_key].get("min_value", RAW_MIN[i])
-                    RAW_MAX[i] = config[sensor_key].get("max_value", RAW_MAX[i])
+                    # New naming: trigger_threshold (high raw) and max_pressure (low raw)
+                    # Fall back to old naming for backward compatibility
+                    RAW_MIN[i] = config[sensor_key].get("max_pressure",
+                                 config[sensor_key].get("min_value", RAW_MIN[i]))
+                    RAW_MAX[i] = config[sensor_key].get("trigger_threshold",
+                                 config[sensor_key].get("max_value", RAW_MAX[i]))
 
             print(f"✓ Config loaded from {CONFIG_FILE}")
             return True
@@ -66,8 +70,8 @@ def save_config():
     config = {}
     for i in range(12):
         config[f"sensor_{i}"] = {
-            "min_value": int(RAW_MIN[i]),
-            "max_value": int(RAW_MAX[i])
+            "max_pressure": int(RAW_MIN[i]),        # Low raw value (strong touch)
+            "trigger_threshold": int(RAW_MAX[i])    # High raw value (light touch/idle)
         }
 
     try:
@@ -250,7 +254,7 @@ def calibrate_sensors(duration=3.0, buffer=3):
     print(f"Calibration complete! ({sample_count} samples)\n")
     print("Detected calibrated values per sensor:")
     for i in range(12):
-        print(f"  sensor_{i}: min_value={RAW_MIN[i]}, max_value={calibrated_max[i]}")
+        print(f"  sensor_{i}: max_pressure={RAW_MIN[i]}, trigger_threshold={calibrated_max[i]}")
 
     # Update global RAW_MAX with calibrated values
     global RAW_MAX
@@ -265,28 +269,28 @@ def calibrate_sensors(duration=3.0, buffer=3):
 
 # ---- OSC CONTROL HANDLERS ----
 def handle_sensor_min(address, *args):
-    """Handle /sensorX/min messages to set minimum threshold."""
+    """Handle /sensorX/pressure messages to set max pressure threshold (low raw value)."""
     try:
-        # Extract sensor number from address like "/sensor9/min"
+        # Extract sensor number from address like "/sensor9/pressure"
         sensor_num = int(address.split('/')[1].replace('sensor', ''))
         if 0 <= sensor_num <= 11 and len(args) > 0:
-            new_min = int(args[0])
-            RAW_MIN[sensor_num] = new_min
-            print(f"📥 OSC: sensor_{sensor_num} min_value = {new_min}")
+            new_pressure = int(args[0])
+            RAW_MIN[sensor_num] = new_pressure
+            print(f"📥 OSC: sensor_{sensor_num} max_pressure = {new_pressure}")
             save_config()  # Auto-save on OSC change
     except Exception as e:
         print(f"⚠ Error handling {address}: {e}")
 
 
 def handle_sensor_max(address, *args):
-    """Handle /sensorX/max messages to set maximum threshold."""
+    """Handle /sensorX/trigger messages to set trigger threshold (high raw value)."""
     try:
-        # Extract sensor number from address like "/sensor9/max"
+        # Extract sensor number from address like "/sensor9/trigger"
         sensor_num = int(address.split('/')[1].replace('sensor', ''))
         if 0 <= sensor_num <= 11 and len(args) > 0:
-            new_max = int(args[0])
-            RAW_MAX[sensor_num] = new_max
-            print(f"📥 OSC: sensor_{sensor_num} max_value = {new_max}")
+            new_trigger = int(args[0])
+            RAW_MAX[sensor_num] = new_trigger
+            print(f"📥 OSC: sensor_{sensor_num} trigger_threshold = {new_trigger}")
             save_config()  # Auto-save on OSC change
     except Exception as e:
         print(f"⚠ Error handling {address}: {e}")
@@ -305,8 +309,8 @@ def start_osc_server():
 
     # Map OSC addresses to handlers
     for i in range(12):
-        dispatcher.map(f"/sensor{i}/min", handle_sensor_min)
-        dispatcher.map(f"/sensor{i}/max", handle_sensor_max)
+        dispatcher.map(f"/sensor{i}/pressure", handle_sensor_min)
+        dispatcher.map(f"/sensor{i}/trigger", handle_sensor_max)
 
     dispatcher.map("/recalibrate", handle_recalibrate)
 
@@ -317,9 +321,9 @@ def start_osc_server():
 
     print(f"🎛 OSC Control Server listening on port 57121")
     print("   Commands:")
-    print("     /sensorX/min <value>  - Set min threshold (e.g., /sensor9/min 86)")
-    print("     /sensorX/max <value>  - Set max threshold (e.g., /sensor9/max 65)")
-    print("     /recalibrate          - Run auto-calibration")
+    print("     /sensorX/pressure <value>  - Set max pressure (low raw, e.g., /sensor9/pressure 45)")
+    print("     /sensorX/trigger <value>   - Set trigger threshold (high raw, e.g., /sensor9/trigger 90)")
+    print("     /recalibrate               - Run auto-calibration")
     return server
 
 
