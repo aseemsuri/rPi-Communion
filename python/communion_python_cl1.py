@@ -39,6 +39,10 @@ def load_config():
         print(f"ℹ Config file not found at {CONFIG_FILE}")
         return False
 
+    # Check if file has content (avoid reading while VSCode is writing)
+    if os.path.getsize(CONFIG_FILE) == 0:
+        return False
+
     try:
         with config_lock:
             with open(CONFIG_FILE, 'r') as f:
