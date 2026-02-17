@@ -22,8 +22,9 @@ RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]  # Default touched va
 RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # Default idle values
 
 # Hardware thresholds (MPR121 chip settings, 0-255, lower=more sensitive)
-HW_TOUCH_THRESHOLD = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100]  # Default: 100
-HW_RELEASE_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40]            # Default: 40
+# Using Bare Conductive defaults optimized for plants: 40/20 (more sensitive than Adafruit default 12/6)
+HW_TOUCH_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40]  # Default: 40
+HW_RELEASE_THRESHOLD = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]  # Default: 20
 
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
@@ -34,10 +35,15 @@ POLL_INTERVAL = 0.01  # 10ms polling
 MAX_RETRIES = 5
 RETRY_DELAY = 2  # seconds between retries
 
+# ---- CALIBRATION ----
+CALIBRATION_INTERVAL_HOURS = 0  # 0 = startup only, N = recalibrate every N hours
+CALIBRATION_BUFFER = 2          # Subtract this from lowest idle value to set trigger_threshold
+_last_calibration_time = None
+
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD
+    global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -67,6 +73,10 @@ def load_config():
                     HW_TOUCH_THRESHOLD[i] = config[sensor_key].get("touch_threshold", HW_TOUCH_THRESHOLD[i])
                     HW_RELEASE_THRESHOLD[i] = config[sensor_key].get("release_threshold", HW_RELEASE_THRESHOLD[i])
 
+            # Top-level settings
+            CALIBRATION_INTERVAL_HOURS = config.get("calibration_interval_hours", CALIBRATION_INTERVAL_HOURS)
+            CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
+
             print(f"✓ Config loaded from {CONFIG_FILE}")
             return True
 
@@ -79,7 +89,10 @@ def save_config():
     """Save current sensor configuration to JSON file."""
     global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD
 
-    config = {}
+    config = {
+        "calibration_interval_hours": CALIBRATION_INTERVAL_HOURS,
+        "calibration_buffer": CALIBRATION_BUFFER
+    }
     for i in range(12):
         config[f"sensor_{i}"] = {
             "max_pressure": int(RAW_MIN[i]),            # Low raw value (strong touch)
@@ -157,6 +170,54 @@ def reset_i2c_bus():
         return False
 
 
+def configure_mpr121_filters(mpr121):
+    """
+    Configure MPR121 filter settings optimized for plant sensing.
+    Based on Bare Conductive Arduino library defaults that worked with Max/MSP.
+
+    Registers:
+    - CONFIG1/AFE1 (0x5C): FFI (First Filter Iterations)
+    - CONFIG2/AFE2 (0x5D): CDT (Charge Discharge Time) and SFI (Second Filter Iterations)
+
+    Settings:
+    - FFI_10 (0x01): 10 samples for first-level filtering
+    - SFI_10 (0x02): 10 samples for second-level filtering
+    - CDT_4US (0x04): 4 microsecond charge time - "reasonable for larger capacitances" (succulents!)
+    """
+    try:
+        # MPR121 register addresses
+        MPR121_CONFIG1 = 0x5C  # Also called AFE1
+        MPR121_CONFIG2 = 0x5D  # Also called AFE2
+
+        # Read current register values
+        current_config1 = mpr121._i2c_device.read(MPR121_CONFIG1, 1)[0]
+        current_config2 = mpr121._i2c_device.read(MPR121_CONFIG2, 1)[0]
+
+        # Configure CONFIG1: Set FFI_10 (bits 6-7)
+        # FFI_10 = 0x01, shifted left 6 bits = 0x40
+        new_config1 = (current_config1 & 0x3F) | (0x01 << 6)
+
+        # Configure CONFIG2: Set CDT_4US (bits 5-7) and SFI_10 (bits 3-4)
+        # CDT_4US = 0x04, shifted left 5 bits = 0x80
+        # SFI_10 = 0x02, shifted left 3 bits = 0x10
+        temp_config2 = (current_config2 & 0x1F) | (0x04 << 5)  # Set CDT
+        new_config2 = (temp_config2 & 0xE7) | (0x02 << 3)       # Set SFI
+
+        # Write new values (need to stop electrode sensing first)
+        mpr121._i2c_device.write(bytes([0x5E, 0x00]))  # Stop (ECR = 0)
+        time.sleep(0.01)
+        mpr121._i2c_device.write(bytes([MPR121_CONFIG1, new_config1]))
+        mpr121._i2c_device.write(bytes([MPR121_CONFIG2, new_config2]))
+        mpr121._i2c_device.write(bytes([0x5E, 0x8F]))  # Restart (ECR = 0x8F, baseline tracking + 12 electrodes)
+
+        print(f"✓ MPR121 filters configured: CONFIG1=0x{new_config1:02X}, CONFIG2=0x{new_config2:02X}")
+        print("  (FFI_10, SFI_10, CDT_4US - optimized for plant capacitance)")
+
+    except Exception as e:
+        print(f"⚠ Warning: Could not configure MPR121 filters: {e}")
+        print("  Continuing with default filter settings...")
+
+
 def initialize_mpr121_with_retry():
     """Initialize MPR121 with automatic retry and I2C reset on failure."""
     for attempt in range(1, MAX_RETRIES + 1):
@@ -164,6 +225,9 @@ def initialize_mpr121_with_retry():
             print(f"Initializing MPR121 (attempt {attempt}/{MAX_RETRIES})...")
             i2c = busio.I2C(board.SCL, board.SDA)
             mpr121 = adafruit_mpr121.MPR121(i2c)
+
+            # Configure advanced filter settings (FFI, SFI, CDT) for plant sensing
+            configure_mpr121_filters(mpr121)
 
             # Configure hardware thresholds from config
             for i in range(12):
@@ -240,15 +304,16 @@ def read_sensor_with_retry(mpr121, sensor_index, max_attempts=3):
     return None
 
 
-def calibrate_sensors(duration=3.0, buffer=3):
+def calibrate_sensors(duration=10.0):
     """
-    Calibrate sensors by finding minimum values over duration seconds.
+    Calibrate sensors by finding minimum (idle) raw values over duration seconds.
+    trigger_threshold = lowest_raw_value - CALIBRATION_BUFFER
     Returns calibrated RAW_MAX array.
     """
+    buffer = CALIBRATION_BUFFER
     print(f"\n=== CALIBRATION MODE ===")
-    print(f"Sampling sensors for {duration} seconds...")
+    print(f"Sampling sensors for {duration} seconds (buffer={buffer})...")
     print("Please keep hands OFF all sensors!\n")
-    buffer = 1
     # Track minimum values for each sensor
     min_values = [float('inf')] * 12
 
@@ -280,11 +345,79 @@ def calibrate_sensors(duration=3.0, buffer=3):
     global RAW_MAX
     RAW_MAX = calibrated_max
 
-    # Save to config file
-    print("\n💾 Saving calibration to config file...")
-    save_config()
+    # Save only trigger_threshold to config — all other values are preserved as-is
+    print("\n💾 Saving calibrated trigger_thresholds to config...")
+    save_calibration_thresholds()
 
     return calibrated_max
+
+
+def save_calibration_thresholds():
+    """
+    Save ONLY trigger_threshold values from calibration back to config.
+    All other values (max_pressure, touch_threshold, release_threshold,
+    calibration_interval_hours) are read from the existing config file and preserved.
+    This means any manual edits are never overwritten by a calibration run.
+    """
+    try:
+        with config_lock:
+            # Read existing config to preserve all non-calibration values
+            existing = {}
+            if os.path.exists(CONFIG_FILE) and os.path.getsize(CONFIG_FILE) > 0:
+                with open(CONFIG_FILE, 'r') as f:
+                    existing = json.load(f)
+
+            # Only update trigger_threshold per sensor
+            for i in range(12):
+                sensor_key = f"sensor_{i}"
+                if sensor_key not in existing:
+                    existing[sensor_key] = {}
+                existing[sensor_key]["trigger_threshold"] = int(RAW_MAX[i])
+
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(existing, f, indent=2)
+
+        print(f"✓ Calibration (trigger_threshold) saved to {CONFIG_FILE}")
+        return True
+
+    except Exception as e:
+        print(f"⚠ Error saving calibration: {e}")
+        return False
+
+
+def start_calibration_timer():
+    """
+    Background thread that runs periodic auto-calibration.
+    Checks every minute whether the interval has elapsed.
+    If CALIBRATION_INTERVAL_HOURS is 0, skips calibration (startup-only mode).
+    Picks up config changes dynamically — no restart needed.
+    """
+    global _last_calibration_time
+
+    def calibration_loop():
+        global _last_calibration_time
+        while True:
+            time.sleep(60)  # Check every minute
+
+            if CALIBRATION_INTERVAL_HOURS <= 0:
+                continue
+
+            now = time.time()
+            # If never calibrated in this session, set reference from now
+            ref = _last_calibration_time if _last_calibration_time else now
+            elapsed_hours = (now - ref) / 3600
+
+            if elapsed_hours >= CALIBRATION_INTERVAL_HOURS:
+                print(f"\n⏰ Scheduled auto-calibration (every {CALIBRATION_INTERVAL_HOURS}h)...")
+                calibrate_sensors()
+                _last_calibration_time = time.time()
+
+    t = threading.Thread(target=calibration_loop, daemon=True)
+    t.start()
+    if CALIBRATION_INTERVAL_HOURS > 0:
+        print(f"⏰ Periodic calibration scheduled every {CALIBRATION_INTERVAL_HOURS}h")
+    else:
+        print("⏰ Calibration: startup only (set calibration_interval_hours in config to enable periodic)")
 
 
 # ---- OSC CONTROL HANDLERS ----
@@ -320,7 +453,7 @@ def handle_recalibrate(address, *args):
     """Handle /recalibrate message to run calibration."""
     print("\n📥 OSC: Recalibration requested...")
     global RAW_MAX
-    RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
+    RAW_MAX = calibrate_sensors()
 
 
 def handle_hw_touch(address, *args):
@@ -398,19 +531,25 @@ def start_osc_server():
 try:
     print(f"OSC Client ready: {osc_ip}:{osc_port}")
 
-    # Load config or run calibration
-    if not load_config():
-        print("🔧 No config found, running auto-calibration...")
-        RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
+    # Load config first to get max_pressure, hardware thresholds, and calibration interval
+    # (trigger_threshold from config is ignored — we always calibrate fresh on boot)
+    if load_config():
+        apply_hardware_thresholds()
     else:
-        print("✓ Using values from config file")
-        apply_hardware_thresholds()  # Apply hardware thresholds to MPR121
+        print("ℹ No config file yet — will be created after calibration")
+
+    # Always calibrate idle values fresh on startup regardless of config
+    print("🔧 Running startup calibration (current idle values)...")
+    calibrate_sensors()
 
     # Start config file watcher for hot-reload
     config_observer = start_config_watcher()
 
     # Start OSC control server
     osc_server = start_osc_server()
+
+    # Start periodic calibration timer (picks up calibration_interval_hours from config)
+    start_calibration_timer()
 
     print("\nStarting main loop... Press Ctrl+C to exit.\n")
     
@@ -430,8 +569,8 @@ try:
                     raw_mapped = map_touch_value(raw_value, RAW_MIN[i], RAW_MAX[i])
 
                     # Debug output for sensor 10 - show ALL values including idle
-                    if i == 10:
-                        print(f"DEBUG sensor_10: raw={raw_value}, trigger={RAW_MAX[i]}, pressure={RAW_MIN[i]}, out={raw_mapped:.1f}")
+                    if i == 9:
+                        print(f"DEBUG sensor_9: raw={raw_value}, trigger={RAW_MAX[i]}, pressure={RAW_MIN[i]}, out={raw_mapped:.1f}")
 
                     # Spike filter
                     # raw_mapped = apply_spike_filter(raw_mapped, smoothed_values[i], MAX_DELTA)

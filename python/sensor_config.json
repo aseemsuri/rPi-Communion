@@ -1,50 +1,76 @@
 {
+  "calibration_interval_hours": 0,
+  "calibration_buffer": 2,
   "sensor_0": {
     "max_pressure": 45,
-    "trigger_threshold": 107
+    "trigger_threshold": 0,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_1": {
     "max_pressure": 45,
-    "trigger_threshold": 83
+    "trigger_threshold": 0,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_2": {
     "max_pressure": 45,
-    "trigger_threshold": 84
+    "trigger_threshold": 0,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_3": {
     "max_pressure": 45,
-    "trigger_threshold": 91
+    "trigger_threshold": 0,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_4": {
     "max_pressure": 45,
-    "trigger_threshold": 97
+    "trigger_threshold": 95,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_5": {
     "max_pressure": 45,
-    "trigger_threshold": 91
+    "trigger_threshold": 90,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_6": {
     "max_pressure": 45,
-    "trigger_threshold": 92
+    "trigger_threshold": 90,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_7": {
     "max_pressure": 45,
-    "trigger_threshold": 91
+    "trigger_threshold": 90,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_8": {
     "max_pressure": 45,
-    "trigger_threshold": 93
+    "trigger_threshold": 91,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_9": {
-    "max_pressure": 25,
-    "trigger_threshold": 74
+    "max_pressure": 45,
+    "trigger_threshold": 69,
+    "touch_threshold": 100,
+    "release_threshold": 40
   },
   "sensor_10": {
     "max_pressure": 45,
-    "trigger_threshold": 82
+    "trigger_threshold": 87,
+    "touch_threshold": 40,
+    "release_threshold": 20
   },
   "sensor_11": {
     "max_pressure": 45,
-    "trigger_threshold": 100
+    "trigger_threshold": 110,
+    "touch_threshold": 100,
+    "release_threshold": 40
   }
 }
