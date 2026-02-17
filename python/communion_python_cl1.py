@@ -360,54 +360,7 @@ def apply_hardware_thresholds():
         mpr121[i].threshold = HW_TOUCH_THRESHOLD[i]
         mpr121[i].release_threshold = HW_RELEASE_THRESHOLD[i]
 
-        # If threshold is very low (< 5), enable proximity mode
-        if HW_TOUCH_THRESHOLD[i] < 5:
-            configure_proximity_mode(i)
-
     print(f"✓ Hardware thresholds applied to MPR121")
-
-
-def configure_proximity_mode(sensor_index):
-    """Configure MPR121 advanced registers for MAXIMUM proximity detection."""
-    global mpr121
-
-    try:
-        print(f"🔧 Configuring ULTRA proximity mode for sensor {sensor_index}...")
-
-        # STEP 1: Stop the MPR121 (required before changing filter settings)
-        mpr121._write_register_byte(0x5E, 0x00)  # ECR - Stop mode
-        time.sleep(0.01)
-
-        # STEP 2: Configure for MAXIMUM sensitivity
-        # FFI (First Filter Iterations) - 0x5B
-        mpr121._write_register_byte(0x5B, 0x00)  # FFI=0 (no filtering, instant response)
-
-        # CDC (Charge Discharge Current) - 0x5C
-        # Higher = more current = more sensitive
-        mpr121._write_register_byte(0x5C, 0x3F)  # CDC=63 (MAXIMUM)
-
-        # CDT (Charge Discharge Time) - 0x5D
-        # Higher = longer charge time = more sensitive to far objects
-        mpr121._write_register_byte(0x5D, 0x07)  # CDT=7 (MAXIMUM - 32μs)
-
-        # Auto-Config registers for baseline tracking
-        mpr121._write_register_byte(0x7B, 0xFF)  # ACE - Enable auto-config
-        mpr121._write_register_byte(0x7C, 0xC0)  # USL - Upper limit
-        mpr121._write_register_byte(0x7D, 0x80)  # LSL - Lower limit
-        mpr121._write_register_byte(0x7E, 0x40)  # TL  - Target level
-
-        # STEP 3: Restart MPR121 with all electrodes enabled
-        mpr121._write_register_byte(0x5E, 0x8C)  # ECR - Run mode, all 12 electrodes
-        time.sleep(0.1)  # Wait for baseline to settle
-
-        print(f"✓ ULTRA proximity mode: CDC=63, CDT=7(32μs), FFI=0, AutoConfig ON")
-        print(f"   Baseline should auto-adjust for maximum range")
-        return True
-
-    except Exception as e:
-        print(f"⚠ Could not configure proximity mode: {e}")
-        print(f"   Error: {type(e).__name__}")
-        return False
 
 
 def start_osc_server():
