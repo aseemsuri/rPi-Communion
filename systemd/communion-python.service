@@ -1,0 +1,30 @@
+[Unit]
+Description=Communion MPR121 Touch Sensor Python Script
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/communion-project
+
+# Activate virtual environment and run Python script
+Environment="PATH=/home/pi/mpr121-env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV=/home/pi/mpr121-env"
+ExecStart=/home/pi/mpr121-env/bin/python3 /home/pi/communion-project/python/communion_python_cl1.py
+
+# Auto-restart on crash
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=communion-python
+
+# Allow I2C bus reset (needs sudo for modprobe)
+# Note: You'll need to add pi user to sudoers for modprobe commands (see setup instructions)
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+[Unit]
+Description=Communion SuperCollider Audio Engine
+After=network.target communion-python.service jack.service
+Wants=communion-python.service
+# Start after Python service so OSC messages are ready
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/communion-project
+
+# Use xvfb for headless operation (virtual framebuffer)
+ExecStart=/usr/bin/xvfb-run -a /usr/bin/sclang /home/pi/communion-project/supercollider/communion_sc_cl3.scd
+
+# Auto-restart on crash (common with JACK issues)
+Restart=always
+RestartSec=10
+
+# Give it time to boot JACK and SuperCollider
+TimeoutStartSec=60
+
+# Cleanup JACK and sclang on stop
+ExecStopPost=/usr/bin/killall -q sclang || true
+ExecStopPost=/usr/bin/killall -q jackd || true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=communion-sc
+
+# Environment for audio
+Environment="DISPLAY=:99"
+Environment="JACK_NO_AUDIO_RESERVATION=1"
+
+[Install]
+WantedBy=multi-user.target
