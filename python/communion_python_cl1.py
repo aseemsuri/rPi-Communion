@@ -3,13 +3,23 @@ import board
 import busio
 import adafruit_mpr121
 from pythonosc.udp_client import SimpleUDPClient
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import ThreadingOSCUDPServer
 import subprocess
 import sys
+import json
+import os
+import threading
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
-# ---- CALIBRATION ----
-# Adjust these per sensor based on idle vs touched readings
-RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]      # Expected minimum raw value when touched
-RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]  # Idle values
+# ---- CONFIG FILE ----
+CONFIG_FILE = "/home/pi/communion-project/python/sensor_config.json"
+config_lock = threading.Lock()
+
+# Will be loaded from config or auto-calibrated
+RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]  # Default touched values
+RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # Default idle values
 
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
@@ -19,6 +29,86 @@ POLL_INTERVAL = 0.01  # 10ms polling
 # ---- RETRY SETTINGS ----
 MAX_RETRIES = 5
 RETRY_DELAY = 2  # seconds between retries
+
+
+def load_config():
+    """Load sensor configuration from JSON file."""
+    global RAW_MIN, RAW_MAX
+
+    if not os.path.exists(CONFIG_FILE):
+        print(f"ℹ Config file not found at {CONFIG_FILE}")
+        return False
+
+    try:
+        with config_lock:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+
+            # Load min/max values for each sensor
+            for i in range(12):
+                sensor_key = f"sensor_{i}"
+                if sensor_key in config:
+                    RAW_MIN[i] = config[sensor_key].get("min_value", RAW_MIN[i])
+                    RAW_MAX[i] = config[sensor_key].get("max_value", RAW_MAX[i])
+
+            print(f"✓ Config loaded from {CONFIG_FILE}")
+            return True
+
+    except Exception as e:
+        print(f"⚠ Error loading config: {e}")
+        return False
+
+
+def save_config():
+    """Save current sensor configuration to JSON file."""
+    global RAW_MIN, RAW_MAX
+
+    config = {}
+    for i in range(12):
+        config[f"sensor_{i}"] = {
+            "min_value": int(RAW_MIN[i]),
+            "max_value": int(RAW_MAX[i])
+        }
+
+    try:
+        with config_lock:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+
+        print(f"✓ Config saved to {CONFIG_FILE}")
+        return True
+
+    except Exception as e:
+        print(f"⚠ Error saving config: {e}")
+        return False
+
+
+class ConfigFileHandler(FileSystemEventHandler):
+    """Watches config file for changes and reloads."""
+    def __init__(self):
+        self.last_modified = 0
+
+    def on_modified(self, event):
+        if event.src_path.endswith('sensor_config.json'):
+            # Debounce: avoid multiple triggers
+            current_time = time.time()
+            if current_time - self.last_modified < 1.0:
+                return
+
+            self.last_modified = current_time
+            print("\n🔄 Config file changed, reloading...")
+            load_config()
+
+
+def start_config_watcher():
+    """Start watching config file for changes."""
+    config_dir = os.path.dirname(CONFIG_FILE)
+    event_handler = ConfigFileHandler()
+    observer = Observer()
+    observer.schedule(event_handler, config_dir, recursive=False)
+    observer.start()
+    print(f"👁 Watching {CONFIG_FILE} for changes...")
+    return observer
 
 
 def reset_i2c_bus():
@@ -151,18 +241,96 @@ def calibrate_sensors(duration=3.0, buffer=3):
     calibrated_max = [max(int(min_val - buffer), 0) for min_val in min_values]
 
     print(f"Calibration complete! ({sample_count} samples)\n")
-    print("Detected minimum values per sensor:")
+    print("Detected calibrated values per sensor:")
     for i in range(12):
-        print(f"  touch{i}: min={int(min_values[i])}, calibrated_max={calibrated_max[i]}")
+        print(f"  sensor_{i}: min_value={RAW_MIN[i]}, max_value={calibrated_max[i]}")
+
+    # Update global RAW_MAX with calibrated values
+    global RAW_MAX
+    RAW_MAX = calibrated_max
+
+    # Save to config file
+    print("\n💾 Saving calibration to config file...")
+    save_config()
 
     return calibrated_max
+
+
+# ---- OSC CONTROL HANDLERS ----
+def handle_sensor_min(address, *args):
+    """Handle /sensorX/min messages to set minimum threshold."""
+    try:
+        # Extract sensor number from address like "/sensor9/min"
+        sensor_num = int(address.split('/')[1].replace('sensor', ''))
+        if 0 <= sensor_num <= 11 and len(args) > 0:
+            new_min = int(args[0])
+            RAW_MIN[sensor_num] = new_min
+            print(f"📥 OSC: sensor_{sensor_num} min_value = {new_min}")
+            save_config()  # Auto-save on OSC change
+    except Exception as e:
+        print(f"⚠ Error handling {address}: {e}")
+
+
+def handle_sensor_max(address, *args):
+    """Handle /sensorX/max messages to set maximum threshold."""
+    try:
+        # Extract sensor number from address like "/sensor9/max"
+        sensor_num = int(address.split('/')[1].replace('sensor', ''))
+        if 0 <= sensor_num <= 11 and len(args) > 0:
+            new_max = int(args[0])
+            RAW_MAX[sensor_num] = new_max
+            print(f"📥 OSC: sensor_{sensor_num} max_value = {new_max}")
+            save_config()  # Auto-save on OSC change
+    except Exception as e:
+        print(f"⚠ Error handling {address}: {e}")
+
+
+def handle_recalibrate(address, *args):
+    """Handle /recalibrate message to run calibration."""
+    print("\n📥 OSC: Recalibration requested...")
+    global RAW_MAX
+    RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
+
+
+def start_osc_server():
+    """Start OSC server for receiving control messages."""
+    dispatcher = Dispatcher()
+
+    # Map OSC addresses to handlers
+    for i in range(12):
+        dispatcher.map(f"/sensor{i}/min", handle_sensor_min)
+        dispatcher.map(f"/sensor{i}/max", handle_sensor_max)
+
+    dispatcher.map("/recalibrate", handle_recalibrate)
+
+    # Start server on port 57121 (different from SuperCollider's 57120)
+    server = ThreadingOSCUDPServer(("0.0.0.0", 57121), dispatcher)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    print(f"🎛 OSC Control Server listening on port 57121")
+    print("   Commands:")
+    print("     /sensorX/min <value>  - Set min threshold (e.g., /sensor9/min 86)")
+    print("     /sensorX/max <value>  - Set max threshold (e.g., /sensor9/max 65)")
+    print("     /recalibrate          - Run auto-calibration")
+    return server
 
 
 try:
     print(f"OSC Client ready: {osc_ip}:{osc_port}")
 
-    # Run calibration
-    RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
+    # Load config or run calibration
+    if not load_config():
+        print("🔧 No config found, running auto-calibration...")
+        RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
+    else:
+        print("✓ Using values from config file")
+
+    # Start config file watcher for hot-reload
+    config_observer = start_config_watcher()
+
+    # Start OSC control server
+    osc_server = start_osc_server()
 
     print("\nStarting main loop... Press Ctrl+C to exit.\n")
     
@@ -224,7 +392,16 @@ try:
 
 except KeyboardInterrupt:
     print("\n\n👋 Shutting down gracefully...")
+    if 'config_observer' in locals():
+        config_observer.stop()
+        config_observer.join()
+    if 'osc_server' in locals():
+        osc_server.shutdown()
 except Exception as e:
     print(f"\n❌ Fatal error: {e}")
     print("Script terminated.")
+    if 'config_observer' in locals():
+        config_observer.stop()
+    if 'osc_server' in locals():
+        osc_server.shutdown()
     raise
