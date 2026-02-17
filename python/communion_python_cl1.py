@@ -368,39 +368,45 @@ def apply_hardware_thresholds():
 
 
 def configure_proximity_mode(sensor_index):
-    """Configure MPR121 advanced registers for proximity detection on specific sensor."""
+    """Configure MPR121 advanced registers for MAXIMUM proximity detection."""
     global mpr121
 
-    # MPR121 advanced register addresses for maximum sensitivity:
-    # 0x5C = CDC (Charge/Discharge Current) - higher = more sensitive
-    # 0x5D = CDT (Charge/Discharge Time) - higher = longer charge time
-    # 0x7B = AFE1 (Analog Front End Config 1)
-    # 0x7C = AFE2 (Analog Front End Config 2)
-
     try:
-        # Use the internal I2C bus from the MPR121 object
-        from adafruit_bus_device import i2c_device
+        print(f"🔧 Configuring ULTRA proximity mode for sensor {sensor_index}...")
 
-        # MPR121 I2C address is 0x5A
-        i2c_addr = 0x5A
+        # STEP 1: Stop the MPR121 (required before changing filter settings)
+        mpr121._write_register_byte(0x5E, 0x00)  # ECR - Stop mode
+        time.sleep(0.01)
 
-        # Get access to write registers directly
-        # These settings maximize sensitivity for proximity detection:
+        # STEP 2: Configure for MAXIMUM sensitivity
+        # FFI (First Filter Iterations) - 0x5B
+        mpr121._write_register_byte(0x5B, 0x00)  # FFI=0 (no filtering, instant response)
 
-        # 1. Set charge/discharge current to maximum (63 = 0x3F)
-        mpr121._write_register_byte(0x5C, 0x3F)  # CDC - Max charge current
+        # CDC (Charge Discharge Current) - 0x5C
+        # Higher = more current = more sensitive
+        mpr121._write_register_byte(0x5C, 0x3F)  # CDC=63 (MAXIMUM)
 
-        # 2. Set charge/discharge time to maximum (7 = 0x07)
-        mpr121._write_register_byte(0x5D, 0x07)  # CDT - Max charge time
+        # CDT (Charge Discharge Time) - 0x5D
+        # Higher = longer charge time = more sensitive to far objects
+        mpr121._write_register_byte(0x5D, 0x07)  # CDT=7 (MAXIMUM - 32μs)
 
-        # 3. Configure first filter iterations
-        mpr121._write_register_byte(0x5B, 0x00)  # FFI - No filtering (most sensitive)
+        # Auto-Config registers for baseline tracking
+        mpr121._write_register_byte(0x7B, 0xFF)  # ACE - Enable auto-config
+        mpr121._write_register_byte(0x7C, 0xC0)  # USL - Upper limit
+        mpr121._write_register_byte(0x7D, 0x80)  # LSL - Lower limit
+        mpr121._write_register_byte(0x7E, 0x40)  # TL  - Target level
 
-        print(f"✓ Proximity mode configured for sensor {sensor_index} (CDC=63, CDT=7, FFI=0)")
+        # STEP 3: Restart MPR121 with all electrodes enabled
+        mpr121._write_register_byte(0x5E, 0x8C)  # ECR - Run mode, all 12 electrodes
+        time.sleep(0.1)  # Wait for baseline to settle
+
+        print(f"✓ ULTRA proximity mode: CDC=63, CDT=7(32μs), FFI=0, AutoConfig ON")
+        print(f"   Baseline should auto-adjust for maximum range")
         return True
+
     except Exception as e:
         print(f"⚠ Could not configure proximity mode: {e}")
-        print(f"   Error details: {type(e).__name__}")
+        print(f"   Error: {type(e).__name__}")
         return False
 
 
