@@ -97,7 +97,14 @@ class ConfigFileHandler(FileSystemEventHandler):
 
             self.last_modified = current_time
             print("\n🔄 Config file changed, reloading...")
-            load_config()
+
+            # Wait for file write to complete, then retry if needed
+            time.sleep(0.1)
+            for attempt in range(3):
+                if load_config():
+                    break
+                if attempt < 2:
+                    time.sleep(0.1)
 
 
 def start_config_watcher():
