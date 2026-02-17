@@ -107,12 +107,17 @@ class ConfigFileHandler(FileSystemEventHandler):
             print("\n🔄 Config file changed, reloading...")
 
             # Wait for file write to complete, then retry if needed
-            time.sleep(0.1)
-            for attempt in range(3):
+            time.sleep(0.2)  # Longer initial delay for VSCode writes
+            success = False
+            for attempt in range(5):  # More retries
                 if load_config():
+                    success = True
                     break
-                if attempt < 2:
-                    time.sleep(0.1)
+                if attempt < 4:
+                    time.sleep(0.15)  # Slightly longer between retries
+
+            if not success:
+                print("⚠ Config reload timed out (file may still be writing)")
 
 
 def start_config_watcher():
