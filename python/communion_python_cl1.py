@@ -359,7 +359,49 @@ def apply_hardware_thresholds():
     for i in range(12):
         mpr121[i].threshold = HW_TOUCH_THRESHOLD[i]
         mpr121[i].release_threshold = HW_RELEASE_THRESHOLD[i]
+
+        # If threshold is very low (< 5), enable proximity mode
+        if HW_TOUCH_THRESHOLD[i] < 5:
+            configure_proximity_mode(i)
+
     print(f"✓ Hardware thresholds applied to MPR121")
+
+
+def configure_proximity_mode(sensor_index):
+    """Configure MPR121 advanced registers for proximity detection on specific sensor."""
+    global mpr121
+
+    # MPR121 advanced register addresses for maximum sensitivity:
+    # 0x5C = CDC (Charge/Discharge Current) - higher = more sensitive
+    # 0x5D = CDT (Charge/Discharge Time) - higher = longer charge time
+    # 0x7B = AFE1 (Analog Front End Config 1)
+    # 0x7C = AFE2 (Analog Front End Config 2)
+
+    try:
+        # Use the internal I2C bus from the MPR121 object
+        from adafruit_bus_device import i2c_device
+
+        # MPR121 I2C address is 0x5A
+        i2c_addr = 0x5A
+
+        # Get access to write registers directly
+        # These settings maximize sensitivity for proximity detection:
+
+        # 1. Set charge/discharge current to maximum (63 = 0x3F)
+        mpr121._write_register_byte(0x5C, 0x3F)  # CDC - Max charge current
+
+        # 2. Set charge/discharge time to maximum (7 = 0x07)
+        mpr121._write_register_byte(0x5D, 0x07)  # CDT - Max charge time
+
+        # 3. Configure first filter iterations
+        mpr121._write_register_byte(0x5B, 0x00)  # FFI - No filtering (most sensitive)
+
+        print(f"✓ Proximity mode configured for sensor {sensor_index} (CDC=63, CDT=7, FFI=0)")
+        return True
+    except Exception as e:
+        print(f"⚠ Could not configure proximity mode: {e}")
+        print(f"   Error details: {type(e).__name__}")
+        return False
 
 
 def start_osc_server():
