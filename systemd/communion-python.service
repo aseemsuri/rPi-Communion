@@ -12,6 +12,7 @@ WorkingDirectory=/home/pi/communion-project
 # Activate virtual environment and run Python script
 Environment="PATH=/home/pi/mpr121-env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="VIRTUAL_ENV=/home/pi/mpr121-env"
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/home/pi/mpr121-env/bin/python3 /home/pi/communion-project/python/communion_python_cl1.py
 
 # Auto-restart on crash
