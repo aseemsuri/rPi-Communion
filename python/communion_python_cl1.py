@@ -21,6 +21,10 @@ config_lock = threading.Lock()
 RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]  # Default touched values
 RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # Default idle values
 
+# Hardware thresholds (MPR121 chip settings, 0-255, lower=more sensitive)
+HW_TOUCH_THRESHOLD = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100]  # Default: 100
+HW_RELEASE_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40]            # Default: 40
+
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
 MAX_DELTA = 10
@@ -33,7 +37,7 @@ RETRY_DELAY = 2  # seconds between retries
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX
+    global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -52,12 +56,16 @@ def load_config():
             for i in range(12):
                 sensor_key = f"sensor_{i}"
                 if sensor_key in config:
-                    # New naming: trigger_threshold (high raw) and max_pressure (low raw)
+                    # Software thresholds (trigger_threshold and max_pressure)
                     # Fall back to old naming for backward compatibility
                     RAW_MIN[i] = config[sensor_key].get("max_pressure",
                                  config[sensor_key].get("min_value", RAW_MIN[i]))
                     RAW_MAX[i] = config[sensor_key].get("trigger_threshold",
                                  config[sensor_key].get("max_value", RAW_MAX[i]))
+
+                    # Hardware thresholds (MPR121 chip sensitivity, 0-255)
+                    HW_TOUCH_THRESHOLD[i] = config[sensor_key].get("touch_threshold", HW_TOUCH_THRESHOLD[i])
+                    HW_RELEASE_THRESHOLD[i] = config[sensor_key].get("release_threshold", HW_RELEASE_THRESHOLD[i])
 
             print(f"✓ Config loaded from {CONFIG_FILE}")
             return True
@@ -69,13 +77,15 @@ def load_config():
 
 def save_config():
     """Save current sensor configuration to JSON file."""
-    global RAW_MIN, RAW_MAX
+    global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD
 
     config = {}
     for i in range(12):
         config[f"sensor_{i}"] = {
-            "max_pressure": int(RAW_MIN[i]),        # Low raw value (strong touch)
-            "trigger_threshold": int(RAW_MAX[i])    # High raw value (light touch/idle)
+            "max_pressure": int(RAW_MIN[i]),            # Low raw value (strong touch)
+            "trigger_threshold": int(RAW_MAX[i]),       # High raw value (light touch/idle)
+            "touch_threshold": int(HW_TOUCH_THRESHOLD[i]),      # Hardware sensitivity (0-255, lower=more sensitive)
+            "release_threshold": int(HW_RELEASE_THRESHOLD[i])   # Hardware release threshold (0-255)
         }
 
     try:
@@ -112,6 +122,7 @@ class ConfigFileHandler(FileSystemEventHandler):
             for attempt in range(5):  # More retries
                 if load_config():
                     success = True
+                    apply_hardware_thresholds()  # Apply hardware thresholds after reload
                     break
                 if attempt < 4:
                     time.sleep(0.15)  # Slightly longer between retries
@@ -154,10 +165,10 @@ def initialize_mpr121_with_retry():
             i2c = busio.I2C(board.SCL, board.SDA)
             mpr121 = adafruit_mpr121.MPR121(i2c)
 
-            # Configure thresholds for stability
+            # Configure hardware thresholds from config
             for i in range(12):
-                mpr121[i].threshold = 100
-                mpr121[i].release_threshold = 40
+                mpr121[i].threshold = HW_TOUCH_THRESHOLD[i]
+                mpr121[i].release_threshold = HW_RELEASE_THRESHOLD[i]
 
             print("✓ MPR121 initialized successfully!")
             return mpr121
@@ -312,14 +323,57 @@ def handle_recalibrate(address, *args):
     RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
 
 
+def handle_hw_touch(address, *args):
+    """Handle /sensorX/hw_touch messages to set hardware touch threshold."""
+    try:
+        sensor_num = int(address.split('/')[1].replace('sensor', ''))
+        if 0 <= sensor_num <= 11 and len(args) > 0:
+            new_threshold = int(args[0])
+            if 0 <= new_threshold <= 255:
+                HW_TOUCH_THRESHOLD[sensor_num] = new_threshold
+                mpr121[sensor_num].threshold = new_threshold
+                print(f"📥 OSC: sensor_{sensor_num} touch_threshold = {new_threshold}")
+                save_config()
+    except Exception as e:
+        print(f"⚠ Error handling {address}: {e}")
+
+
+def handle_hw_release(address, *args):
+    """Handle /sensorX/hw_release messages to set hardware release threshold."""
+    try:
+        sensor_num = int(address.split('/')[1].replace('sensor', ''))
+        if 0 <= sensor_num <= 11 and len(args) > 0:
+            new_threshold = int(args[0])
+            if 0 <= new_threshold <= 255:
+                HW_RELEASE_THRESHOLD[sensor_num] = new_threshold
+                mpr121[sensor_num].release_threshold = new_threshold
+                print(f"📥 OSC: sensor_{sensor_num} release_threshold = {new_threshold}")
+                save_config()
+    except Exception as e:
+        print(f"⚠ Error handling {address}: {e}")
+
+
+def apply_hardware_thresholds():
+    """Apply hardware thresholds to MPR121 chip (call after config load)."""
+    global mpr121
+    for i in range(12):
+        mpr121[i].threshold = HW_TOUCH_THRESHOLD[i]
+        mpr121[i].release_threshold = HW_RELEASE_THRESHOLD[i]
+    print(f"✓ Hardware thresholds applied to MPR121")
+
+
 def start_osc_server():
     """Start OSC server for receiving control messages."""
     dispatcher = Dispatcher()
 
     # Map OSC addresses to handlers
     for i in range(12):
+        # Software thresholds
         dispatcher.map(f"/sensor{i}/pressure", handle_sensor_min)
         dispatcher.map(f"/sensor{i}/trigger", handle_sensor_max)
+        # Hardware thresholds
+        dispatcher.map(f"/sensor{i}/hw_touch", handle_hw_touch)
+        dispatcher.map(f"/sensor{i}/hw_release", handle_hw_release)
 
     dispatcher.map("/recalibrate", handle_recalibrate)
 
@@ -329,10 +383,14 @@ def start_osc_server():
     server_thread.start()
 
     print(f"🎛 OSC Control Server listening on port 57121")
-    print("   Commands:")
-    print("     /sensorX/pressure <value>  - Set max pressure (low raw, e.g., /sensor9/pressure 45)")
-    print("     /sensorX/trigger <value>   - Set trigger threshold (high raw, e.g., /sensor9/trigger 90)")
-    print("     /recalibrate               - Run auto-calibration")
+    print("   Software thresholds:")
+    print("     /sensorX/pressure <value>   - Max pressure point (e.g., /sensor9/pressure 45)")
+    print("     /sensorX/trigger <value>    - Trigger threshold (e.g., /sensor9/trigger 90)")
+    print("   Hardware sensitivity (0-255, lower=more sensitive):")
+    print("     /sensorX/hw_touch <value>   - Touch threshold (e.g., /sensor10/hw_touch 12)")
+    print("     /sensorX/hw_release <value> - Release threshold (e.g., /sensor10/hw_release 6)")
+    print("   Calibration:")
+    print("     /recalibrate                - Run auto-calibration")
     return server
 
 
@@ -345,6 +403,7 @@ try:
         RAW_MAX = calibrate_sensors(duration=3.0, buffer=3)
     else:
         print("✓ Using values from config file")
+        apply_hardware_thresholds()  # Apply hardware thresholds to MPR121
 
     # Start config file watcher for hot-reload
     config_observer = start_config_watcher()
