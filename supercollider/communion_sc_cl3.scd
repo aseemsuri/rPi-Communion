@@ -30,18 +30,22 @@
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
+    "/home/pi/communion-project/supercollider/samples/kick.wav",          // touch4 = flowerPlant (muted/unused)
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
-    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
-    "/home/pi/communion-project/supercollider/samples/kick.wav",          // touch10 = flowerPlant
+    "/home/pi/communion-project/supercollider/samples/trumpet.wav",       // touch10 = trumpetPlant
     "/home/pi/communion-project/supercollider/samples/strings.wav",      // touch11 = stringsPlant
 ];
 
 ~baseNote = 24;
 ~emaAlpha = 0.8;  // Higher = more responsive (less smoothing)
+
+~moneyPlantNotes  = [0, 2, 4, 7, 9, 12];
+~trumpetNotes     = [0, 2, 4,5, 7, 9,11, 12];
+~flowerPlantNotes = [-7, -5, 0, 5, 7];
 
 // ========== END TUNING ==========
 
@@ -88,21 +92,6 @@ s.waitForBoot({
     }).add;
     
     // Money Plant synth with pentatonic pitching
-    ~majorPentatonic = [0, 2, 4, 7, 9, 12];
-
-    ~getRandomPentatonicNote = { |v|
-        var interval = ~majorPentatonic.choose;
-        v + interval;
-    };
-
-    // Flower Plant pitch options: fa down, sol down, root, fa, sol
-    ~flowerPlantPitches = [-7, -5, 0, 5, 7];
-
-    ~getRandomFlowerPlantNote = { |v|
-        var interval = ~flowerPlantPitches.choose;
-        v + interval;
-    };
-    
     SynthDef(\moneyPlant, { |bufnum, amp=0.9, rate=1, gate=1, out=0, atk=0.001, rel=0.015, vibrato=0|
         var rateScale = BufRateScale.kr(bufnum) * rate;
         var vibLfo = SinOsc.kr(5, 0, vibrato * 0.05);  // 5Hz vibrato, max 5% rate variation
@@ -120,6 +109,18 @@ s.waitForBoot({
         Out.ar(out, (src * eg * amp) ! 2);
     }).add;
 
+    // Trumpet Plant synth - major scale with vibrato
+    SynthDef(\trumpetPlant, { |bufnum, amp=1.1, rate=1, gate=1, out=0, atk=0.06, dec=0.1, sus=0.2, rel=0.06, vibrato=0|
+        var rateScale = BufRateScale.kr(bufnum) * rate;
+        var vibLfo = SinOsc.kr(5, 0, vibrato * 0.05);
+        var vibratingRate = rateScale * (1.0 + vibLfo);
+        var src = PlayBuf.ar(1, bufnum, vibratingRate, gate, startPos: 0, loop: 0);
+        var eg = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction: 2);
+        var sig = src * eg * amp;
+        var compressed = Compander.ar(sig, sig, thresh: 0.1, slopeBelow: 1, slopeAbove: 0.1, clampTime: 0.01, relaxTime: 0.1);
+        Out.ar(out, compressed ! 2);
+    }).add;
+
     // Warmer synth - simple sine wave at 440Hz
     SynthDef(\warmer, { |out=0, amp=0.05|
         var sig = SinOsc.ar(440, 0, amp);
@@ -127,10 +128,10 @@ s.waitForBoot({
     }).add;
 
     // Strings Plant synth - for chord building (root, third, fifth, octave)
-    SynthDef(\stringsPlant, { |bufnum, amp=0.03, rate=1, gate=1, out=0, atk=0.05, rel=0.8|
+    SynthDef(\stringsPlant, { |bufnum, amp=0.3, rate=1, gate=1, out=0, atk=0.05, dec=0.2, sus=0.7, rel=0.8|
         var rateScale = BufRateScale.kr(bufnum) * rate;
         var src = PlayBuf.ar(1, bufnum, rateScale, startPos: 0, loop: 0);
-        var eg = EnvGen.kr(Env.asr(atk, 1.0, rel), gate, doneAction: 2);
+        var eg = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction: 2);
         Out.ar(out, (src * eg * amp) ! 2);
     }).add;
 
@@ -258,7 +259,7 @@ s.waitForBoot({
 
             if (risingEdge and: pressed.not) {
                 pressed = true;
-                currentNote = ~getRandomPentatonicNote.(~baseNote);
+                currentNote = ~baseNote + ~moneyPlantNotes.choose;
                 rate = (currentNote - ~baseNote).midiratio;
 
                 if (synth.notNil) { synth.free };
@@ -336,7 +337,7 @@ s.waitForBoot({
 
             if (risingEdge and: pressed.not) {
                 pressed = true;
-                currentNote = ~getRandomFlowerPlantNote.(~baseNote);
+                currentNote = ~baseNote + ~flowerPlantNotes.choose;
                 rate = (currentNote - ~baseNote).midiratio;
 
                 if (synth.notNil) { synth.free };
@@ -369,10 +370,89 @@ s.waitForBoot({
         }, oscPath, recvPort: NetAddr.langPort);
     };
 
+    // Trumpet Plant handler (touch10) - major scale with pressure-based vibrato
+    ~makeTrumpetHandler = { |touchKey, bufIndex, bufferObj, oscPath, index|
+        var onThresh = ~touchOnThresh[index];
+        var offThresh = ~touchOffThresh[index];
+        var deltaMin = ~touchDeltaMin[index];
+
+        var ema = 0.0;
+        var lastEma = 0.0;
+        var pressed = false;
+        var synth = nil;
+        var currentNote = 36;
+
+        var vibratoMap = { |v|
+            v.linlin(onThresh, 100.0, 0.0, 1.0).clip(0, 1)
+        };
+
+        OSCdef(touchKey, { |msg|
+            var raw, risingEdge, fallingEdge, rate, potentialRisingEdge;
+            raw = (msg.size > 1 and: { msg[1].isNumber })
+                .if({ msg[1].asFloat }, { 0.0 });
+
+            lastEma = ema;
+
+            potentialRisingEdge = (raw > onThresh) and: ((raw - ema) > deltaMin) and: pressed.not;
+
+            if (potentialRisingEdge) {
+                ema = raw;
+            } {
+                ema = (~emaAlpha * raw) + ((1 - ~emaAlpha) * ema);
+            };
+
+            risingEdge = potentialRisingEdge;
+            fallingEdge = (ema < offThresh);
+
+            if (risingEdge and: pressed.not) {
+                pressed = true;
+                currentNote = (~baseNote - 12) + (~trumpetNotes.choose);
+                rate = (currentNote - ~baseNote).midiratio;
+
+                if (synth.notNil) { synth.free };
+
+                synth = Synth(\trumpetPlant, [
+                    \bufnum, bufferObj.bufnum,
+                    \amp, 8.0,
+                    \rate, rate,
+                    \vibrato, vibratoMap.(ema),
+                    \atk, 0.7,
+                    \dec, 0.3,
+                    \sus, 0.1,
+                    \rel, 0.01
+                ]);
+
+                synth.onFree({ synth = nil });
+
+                (">>> " ++ touchKey ++ " TRIGGER: note=%, rate=%"
+                    .format(currentNote, rate.round(0.001))).postln;
+            };
+
+            if (pressed and: synth.notNil and: { synth.isPlaying }) {
+                synth.set(\vibrato, vibratoMap.(ema));
+            };
+
+            if (pressed and: fallingEdge) {
+                pressed = false;
+                ema = 0.0;
+
+                synth.set(\gate, 0);
+
+                ("<<< " ++ touchKey ++ " RELEASE").postln;
+            };
+        }, oscPath, recvPort: NetAddr.langPort);
+    };
+
     // Strings Plant handler (touch11) - chord building based on pressure
     ~makeStringsPlantHandler = { |touchKey, bufIndex, bufferObj, oscPath, index|
         var onThresh = ~touchOnThresh[index];
         var offThresh = ~touchOffThresh[index];
+
+        var stringsAtk  = 0.5;
+        var stringsDec  = 0.2;
+        var stringsSus  = 0.1;
+        var stringsRel  = 0.01;
+        var stringsAmp  = 0.1;
 
         var ema = 0.0;
         var rootSynth = nil;
@@ -397,6 +477,8 @@ s.waitForBoot({
 
             ema = (~emaAlpha * raw) + ((1 - ~emaAlpha) * ema);
 
+            ("touch11 ema=%".format(ema.round(0.01))).postln;
+
             // Add root note when touch starts
             if ((ema > rootThresh) and: rootPlaying.not) {
                 rootPlaying = true;
@@ -404,10 +486,9 @@ s.waitForBoot({
                 if (rootSynth.notNil) { rootSynth.free };
                 rootSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.01,
-                    \rate, 1.0,  // Root note (0 semitones)
-                    \atk, 0.05,
-                    \rel, 0.8
+                    \amp, stringsAmp,
+                    \rate, 1.0 * 0.5,  // Root note, octave down
+                    \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 rootSynth.onFree({ rootSynth = nil; rootPlaying = false });
                 (">>> " ++ touchKey ++ " ROOT added (ema=%)".format(ema.round(0.1))).postln;
@@ -420,10 +501,9 @@ s.waitForBoot({
                 if (thirdSynth.notNil) { thirdSynth.free };
                 thirdSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.01,
+                    \amp, stringsAmp,
                     \rate, 4.midiratio,  // Major third (4 semitones)
-                    \atk, 0.05,
-                    \rel, 0.8
+                    \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 thirdSynth.onFree({ thirdSynth = nil; thirdPlaying = false });
                 (">>> " ++ touchKey ++ " THIRD added (ema=%)".format(ema.round(0.1))).postln;
@@ -436,10 +516,9 @@ s.waitForBoot({
                 if (fifthSynth.notNil) { fifthSynth.free };
                 fifthSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.01,
+                    \amp, stringsAmp,
                     \rate, 7.midiratio,  // Perfect fifth (7 semitones)
-                    \atk, 0.05,
-                    \rel, 0.8
+                    \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 fifthSynth.onFree({ fifthSynth = nil; fifthPlaying = false });
                 (">>> " ++ touchKey ++ " FIFTH added (ema=%)".format(ema.round(0.1))).postln;
@@ -452,10 +531,9 @@ s.waitForBoot({
                 if (octaveSynth.notNil) { octaveSynth.free };
                 octaveSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.01,
+                    \amp, stringsAmp,
                     \rate, 12.midiratio,  // Octave (12 semitones)
-                    \atk, 0.05,
-                    \rel, 0.8
+                    \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 octaveSynth.onFree({ octaveSynth = nil; octavePlaying = false });
                 (">>> " ++ touchKey ++ " OCTAVE added (ema=%)".format(ema.round(0.1))).postln;
@@ -497,8 +575,8 @@ s.waitForBoot({
             );
         } {
             if (i == 10) {
-                // Touch10 = Flower Plant with fa/sol pitching
-                ~makeFlowerPlantHandler.(
+                // Touch10 = Trumpet Plant with major scale + vibrato
+                ~makeTrumpetHandler.(
                     touchKey, i, ~buffers[i], oscPath, i
                 );
             } {
