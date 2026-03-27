@@ -620,7 +620,7 @@ s.waitForBoot({
     s.sync;
 
     // Start the warmer synth
-    ~warmerSynth = Synth(\warmer, [\amp, 0.01]);
+    // ~warmerSynth = Synth(\warmer, [\amp, 0.01]);
 
     // Start shared reverb at tail of node tree (processes after all instruments)
     // ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 20, \revtime, 5, \damp, 0.5], addAction: \addToTail);
