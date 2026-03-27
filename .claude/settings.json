@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(rsync -av /Users/aseemsuri/pi-mount/supercollider/communion_sc_cl3.scd pi@c74rpi.local:/home/pi/communion-project/supercollider/)",
+      "Read(//Users/aseemsuri/.ssh/**)",
+      "Bash(ssh-add ~/.ssh/id_ed25519)",
+      "Bash(ssh -T git@github.com)",
+      "Bash(ssh-add -l)",
+      "Read(//Users/aseemsuri/**)"
+    ]
+  }
+}

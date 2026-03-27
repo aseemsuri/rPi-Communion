@@ -169,9 +169,6 @@ s.waitForBoot({
         var lastEma = 0.0;
         var pressed = false;
         var synth = nil;
-        var lastTriggerTime = 0;
-        var debounceTime = 0.2;  // 200ms minimum between triggers
-
         var ampMap = { |v|
             v.linlin(onThresh, 100.0, 0.1, 1.0).clip(0, 1)
         };
@@ -193,11 +190,10 @@ s.waitForBoot({
             risingEdge = (ema > onThresh) and: ((ema - lastEma) > deltaMin);
             fallingEdge = (ema < offThresh);
 
-            if (risingEdge and: pressed.not and: { (Main.elapsedTime - lastTriggerTime) > debounceTime }) {
+            if (risingEdge and: pressed.not) {
                 pressed = true;
-                lastTriggerTime = Main.elapsedTime;
 
-                if (synth.notNil) { synth.set(\gate, 0) };
+                if (synth.notNil) { synth.free };
                 
                 synth = Synth(\basicSampler, [
                     \bufnum, bufferObj.bufnum,
@@ -244,9 +240,6 @@ s.waitForBoot({
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
-        var lastTriggerTime = 0;
-        var debounceTime = 0.2;
-
         var ampMap = { |v|
             0.9  // Fixed amplitude (not touch-sensitive)
         };
@@ -276,13 +269,12 @@ s.waitForBoot({
             risingEdge = potentialRisingEdge;
             fallingEdge = (ema < offThresh);
 
-            if (risingEdge and: pressed.not and: { (Main.elapsedTime - lastTriggerTime) > debounceTime }) {
+            if (risingEdge and: pressed.not) {
                 pressed = true;
-                lastTriggerTime = Main.elapsedTime;
                 currentNote = ~baseNote + ~moneyPlantNotes.choose;
                 rate = (currentNote - ~baseNote).midiratio;
 
-                if (synth.notNil) { synth.set(\gate, 0) };
+                if (synth.notNil) { synth.free };
 
                 synth = Synth(\moneyPlant, [
                     \bufnum, bufferObj.bufnum,
@@ -290,7 +282,7 @@ s.waitForBoot({
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
                     \atk, 0.001,
-                    \rel, 0.1
+                    \rel, 0.015
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -329,9 +321,6 @@ s.waitForBoot({
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
-        var lastTriggerTime = 0;
-        var debounceTime = 0.2;
-
         var ampMap = { |v|
             0.9  // Fixed amplitude (not touch-sensitive)
         };
@@ -362,14 +351,14 @@ s.waitForBoot({
                 currentNote = ~baseNote + ~flowerPlantNotes.choose;
                 rate = (currentNote - ~baseNote).midiratio;
 
-                if (synth.notNil) { synth.set(\gate, 0) };
+                if (synth.notNil) { synth.free };
 
                 synth = Synth(\flowerPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, 0.9,
                     \rate, rate,
                     \atk, 0.001,
-                    \rel, 0.1
+                    \rel, 0.015
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -403,8 +392,6 @@ s.waitForBoot({
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
-        var lastTriggerTime = 0;
-        var debounceTime = 0.2;
 
         var vibratoMap = { |v|
             v.linlin(onThresh, 100.0, 0.0, 1.0).clip(0, 1)
@@ -428,13 +415,12 @@ s.waitForBoot({
             risingEdge = potentialRisingEdge;
             fallingEdge = (ema < offThresh);
 
-            if (risingEdge and: pressed.not and: { (Main.elapsedTime - lastTriggerTime) > debounceTime }) {
+            if (risingEdge and: pressed.not) {
                 pressed = true;
-                lastTriggerTime = Main.elapsedTime;
                 currentNote = (~baseNote - 12) + (~trumpetNotes.choose);
                 rate = (currentNote - ~baseNote).midiratio;
 
-                if (synth.notNil) { synth.set(\gate, 0) };
+                if (synth.notNil) { synth.free };
 
                 synth = Synth(\trumpetPlant, [
                     \bufnum, bufferObj.bufnum,
@@ -446,7 +432,7 @@ s.waitForBoot({
                     \atk, 0.7,
                     \dec, 0.3,
                     \sus, 0.1,
-                    \rel, 0.1
+                    \rel, 0.01
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -510,7 +496,7 @@ s.waitForBoot({
             if ((ema > rootThresh) and: rootPlaying.not) {
                 rootPlaying = true;
                 // Free old synth if it exists
-                if (rootSynth.notNil) { rootSynth.set(\gate, 0) };
+                if (rootSynth.notNil) { rootSynth.free };
                 rootSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp,
@@ -526,7 +512,7 @@ s.waitForBoot({
             if ((ema > thirdThresh) and: thirdPlaying.not and: rootPlaying) {
                 thirdPlaying = true;
                 // Free old synth if it exists
-                if (thirdSynth.notNil) { thirdSynth.set(\gate, 0) };
+                if (thirdSynth.notNil) { thirdSynth.free };
                 thirdSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp-0.02,
@@ -542,7 +528,7 @@ s.waitForBoot({
             if ((ema > fifthThresh) and: fifthPlaying.not and: thirdPlaying) {
                 fifthPlaying = true;
                 // Free old synth if it exists
-                if (fifthSynth.notNil) { fifthSynth.set(\gate, 0) };
+                if (fifthSynth.notNil) { fifthSynth.free };
                 fifthSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp-0.05,
@@ -558,7 +544,7 @@ s.waitForBoot({
             if ((ema > octaveThresh) and: octavePlaying.not and: fifthPlaying) {
                 octavePlaying = true;
                 // Free old synth if it exists
-                if (octaveSynth.notNil) { octaveSynth.set(\gate, 0) };
+                if (octaveSynth.notNil) { octaveSynth.free };
                 octaveSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp-0.05,
@@ -573,19 +559,19 @@ s.waitForBoot({
             // Release all notes when hand lifts
             if (ema < offThresh) {
                 if (rootPlaying) {
-                    if (rootSynth.notNil) { rootSynth.set(\gate, 0) };
+                    if (rootSynth.notNil) { rootSynth.free };
                     rootPlaying = false;
                 };
                 if (thirdPlaying) {
-                    if (thirdSynth.notNil) { thirdSynth.set(\gate, 0) };
+                    if (thirdSynth.notNil) { thirdSynth.free };
                     thirdPlaying = false;
                 };
                 if (fifthPlaying) {
-                    if (fifthSynth.notNil) { fifthSynth.set(\gate, 0) };
+                    if (fifthSynth.notNil) { fifthSynth.free };
                     fifthPlaying = false;
                 };
                 if (octavePlaying) {
-                    if (octaveSynth.notNil) { octaveSynth.set(\gate, 0) };
+                    if (octaveSynth.notNil) { octaveSynth.free };
                     octavePlaying = false;
                 };
                 ema = 0.0;
@@ -634,7 +620,7 @@ s.waitForBoot({
     s.sync;
 
     // Start the warmer synth
-    ~warmerSynth = Synth(\warmer, [\amp, 0.001]);
+    ~warmerSynth = Synth(\warmer, [\amp, 0.01]);
 
     // Start shared reverb at tail of node tree (processes after all instruments)
     // ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 20, \revtime, 5, \damp, 0.5], addAction: \addToTail);

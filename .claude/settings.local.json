@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add README.md python/communion_python_cl1.py supercollider/communion_sc_cl3.scd .jackdrc fix_audio_card.sh run_python.sh run_supercollider.sh supercollider/run_communion.sh)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nImproved touch responsiveness and system configuration - moneyPlant done\n\n- Optimized EMA smoothing (alpha 0.8) for snappier response\n- Added instant EMA jump on rising edge to eliminate ramp-up delay\n- Lowered JACK buffer sizes (128) for reduced audio latency\n- Fixed USB audio card persistence (hw:3)\n- Created wrapper scripts for easy Python and SuperCollider launch\n- Added JACK cleanup on SuperCollider shutdown\n- Configured persistent ALSA device mapping\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push origin main)",
+      "Bash(git branch -D instr3)",
+      "Bash(git add -A)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd stringsPlant instrument with chord building on touch11\n\n- Implemented progressive chord building based on touch pressure\n  - Root at 1.0 threshold\n  - Third at 25.0 threshold (major third, 4 semitones)\n  - Fifth at 50.0 threshold (perfect fifth, 7 semitones)\n  - Octave at 75.0 threshold (12 semitones)\n- All notes release together when hand lifts\n- Fixed ''Group 1 not found'' error by adding s.initTree before warmer synth\n- Fixed stuck note issue by freeing old synths and resetting flags in onFree\n- Updated Python to poll touch11 (range 9-12)\n- Using moneyPlant.wav temporarily (strings.aif has unsupported compression)\n\nTODO: Fine-tune stringsPlant parameters (thresholds, amplitudes, envelopes)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git checkout -b init_calibration)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd automatic sensor calibration on startup\n\n- Implemented 3-second calibration routine at startup\n- Finds minimum raw value for each sensor (idle/untouched state)\n- Subtracts buffer of 3 to set RAW_MAX for each sensor\n- Prints calibrated values before starting main loop\n- Eliminates need for manual RAW_MAX array tuning\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git checkout instr3)",
+      "Bash(git merge init_calibration -m \"$(cat <<''EOF''\nMerge init_calibration: Add automatic sensor calibration\n\nCalibration done - sensors auto-calibrate on startup\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git branch -d init_calibration)",
+      "Bash(git add setup_new_pi.sh requirements.txt)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd automated setup script for new Pi deployments\n\n- Created setup_new_pi.sh to automate full installation process\n- Installs SuperCollider, JACK, Python venv, I2C tools automatically\n- Configures audio permissions and I2C interface\n- Uses requirements.txt for reproducible Python environment\n- Entire setup takes ~5-10 minutes, fully automated\n\nThis will be updated as project evolves and deployment needs change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ssh pi@c74rpi.local:*)",
+      "Bash(ssh -o StrictHostKeyChecking=no pi@c74rpi.local \"sudo systemctl list-units --type=service --state=running | grep -i communion\")",
+      "Bash(python3 -m json.tool)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
