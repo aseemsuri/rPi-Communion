@@ -54,8 +54,8 @@ s.options.sampleRate = 48000;
 s.options.numOutputBusChannels = 2;
 s.options.numInputBusChannels = 0;  // No input needed
 s.options.device = "hw:1";  // USB Audio card 1
-s.options.blockSize = 1024;        // Lower = more responsive (default is 64)
-s.options.hardwareBufferSize = 1024;  // Match JACK buffer
+s.options.blockSize = 256;        // Lower = more responsive (default is 64)
+s.options.hardwareBufferSize = 256;  // Match JACK buffer
 
 // Force JACK to use the correct device via inDevice/outDevice
 s.options.inDevice = "hw:1";
