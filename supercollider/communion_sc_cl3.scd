@@ -73,6 +73,9 @@ s.waitForBoot({
 
 
 
+    // ---- REVERB BUS ----
+    ~reverbBus = Bus.audio(s, 1);
+
     // ---- LOAD SAMPLES ----
     ~buffers = ();
     ~samplePaths.do({ |path, i|
@@ -110,7 +113,7 @@ s.waitForBoot({
     }).add;
 
     // Trumpet Plant synth - major scale with vibrato
-    SynthDef(\trumpetPlant, { |bufnum, amp=1.1, rate=1, gate=1, out=0, atk=0.06, dec=0.1, sus=0.2, rel=0.06, vibrato=0|
+    SynthDef(\trumpetPlant, { |bufnum, amp=1.1, rate=1, gate=1, out=0, reverbBus=0, reverbSend=0, atk=0.06, dec=0.1, sus=0.2, rel=0.06, vibrato=0|
         var rateScale = BufRateScale.kr(bufnum) * rate;
         var vibLfo = SinOsc.kr(5, 0, vibrato * 0.05);
         var vibratingRate = rateScale * (1.0 + vibLfo);
@@ -119,6 +122,7 @@ s.waitForBoot({
         var sig = src * eg * amp;
         var compressed = Compander.ar(sig, sig, thresh: 0.1, slopeBelow: 1, slopeAbove: 0.1, clampTime: 0.01, relaxTime: 0.1);
         Out.ar(out, compressed ! 2);
+        Out.ar(reverbBus, sig * reverbSend);
     }).add;
 
     // Warmer synth - simple sine wave at 440Hz
@@ -127,12 +131,21 @@ s.waitForBoot({
         Out.ar(out, sig ! 2);
     }).add;
 
+    // Shared reverb — reads from reverbBus, runs at tail of node tree
+    SynthDef(\reverbTail, { |reverbBus=0, out=0, room=20, revtime=5, damp=0.5, amp=1|
+        var in = In.ar(reverbBus, 1);
+        var verb = GVerb.ar(in, room, revtime, damp);
+        Out.ar(out, verb * amp);
+    }).add;
+
     // Strings Plant synth - for chord building (root, third, fifth, octave)
-    SynthDef(\stringsPlant, { |bufnum, amp=0.3, rate=1, gate=1, out=0, atk=0.05, dec=0.2, sus=0.7, rel=0.8|
+    SynthDef(\stringsPlant, { |bufnum, amp=0.1, rate=1, gate=1, out=0, reverbBus=0, reverbSend=0, atk=0.1, dec=1.5, sus=0.5, rel=0.1|
         var rateScale = BufRateScale.kr(bufnum) * rate;
         var src = PlayBuf.ar(1, bufnum, rateScale, startPos: 0, loop: 0);
         var eg = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction: 2);
-        Out.ar(out, (src * eg * amp) ! 2);
+        var sig = src * eg * amp;
+        Out.ar(out, sig ! 2);
+        Out.ar(reverbBus, sig * reverbSend);
     }).add;
 
     s.sync;
@@ -416,6 +429,8 @@ s.waitForBoot({
                     \amp, 8.0,
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
+                    \reverbBus, ~reverbBus,
+                    \reverbSend, 0.2,
                     \atk, 0.7,
                     \dec, 0.3,
                     \sus, 0.1,
@@ -448,10 +463,10 @@ s.waitForBoot({
         var onThresh = ~touchOnThresh[index];
         var offThresh = ~touchOffThresh[index];
 
-        var stringsAtk  = 0.5;
-        var stringsDec  = 0.2;
-        var stringsSus  = 0.1;
-        var stringsRel  = 0.01;
+        var stringsAtk  = 0.1;
+        var stringsDec  = 1.5;  // time to decay from peak to sustain level
+        var stringsSus  = 0.5;  // holds at 50% while held
+        var stringsRel  = 0.5;
         var stringsAmp  = 0.1;
 
         var ema = 0.0;
@@ -466,9 +481,9 @@ s.waitForBoot({
 
         // Thresholds for adding notes
         var rootThresh = 1.0;     // Root plays immediately on touch
-        var thirdThresh = 25.0;   // Third added at 25%
-        var fifthThresh = 50.0;   // Fifth added at 50%
-        var octaveThresh = 75.0;  // Octave added at 75%
+        var thirdThresh = 15.0;   // Third added at 25%
+        var fifthThresh = 40.0;   // Fifth added at 50%
+        var octaveThresh = 60.0;  // Octave added at 75%
 
         OSCdef(touchKey, { |msg|
             var raw;
@@ -488,6 +503,7 @@ s.waitForBoot({
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp,
                     \rate, 1.0 * 0.5,  // Root note, octave down
+                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 rootSynth.onFree({ rootSynth = nil; rootPlaying = false });
@@ -501,8 +517,9 @@ s.waitForBoot({
                 if (thirdSynth.notNil) { thirdSynth.free };
                 thirdSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, stringsAmp,
+                    \amp, stringsAmp-0.02,
                     \rate, 4.midiratio,  // Major third (4 semitones)
+                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 thirdSynth.onFree({ thirdSynth = nil; thirdPlaying = false });
@@ -516,8 +533,9 @@ s.waitForBoot({
                 if (fifthSynth.notNil) { fifthSynth.free };
                 fifthSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, stringsAmp,
+                    \amp, stringsAmp-0.05,
                     \rate, 7.midiratio,  // Perfect fifth (7 semitones)
+                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 fifthSynth.onFree({ fifthSynth = nil; fifthPlaying = false });
@@ -531,8 +549,9 @@ s.waitForBoot({
                 if (octaveSynth.notNil) { octaveSynth.free };
                 octaveSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, stringsAmp,
+                    \amp, stringsAmp-0.05,
                     \rate, 12.midiratio,  // Octave (12 semitones)
+                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 octaveSynth.onFree({ octaveSynth = nil; octavePlaying = false });
@@ -604,6 +623,9 @@ s.waitForBoot({
 
     // Start the warmer synth
     ~warmerSynth = Synth(\warmer, [\amp, 0.001]);
+
+    // Start shared reverb at tail of node tree (processes after all instruments)
+    ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 20, \revtime, 5, \damp, 0.5], addAction: \addToTail);
 
     "✓ Ready! Listening on /touch0 through /touch11".postln;
 });

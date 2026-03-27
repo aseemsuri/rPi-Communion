@@ -67,23 +67,23 @@
   },
   "sensor_9": {
     "max_pressure": 45,
-    "trigger_threshold": 69,
+    "trigger_threshold": 72,
     "touch_threshold": 100,
     "release_threshold": 40,
-    "raw_idle": 72
+    "raw_idle": 75
   },
   "sensor_10": {
     "max_pressure": 45,
-    "trigger_threshold": 78,
+    "trigger_threshold": 79,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 81
+    "raw_idle": 82
   },
   "sensor_11": {
     "max_pressure": 45,
-    "trigger_threshold": 100,
+    "trigger_threshold": 91,
     "touch_threshold": 100,
     "release_threshold": 40,
-    "raw_idle": 103
+    "raw_idle": 94
   }
 }
