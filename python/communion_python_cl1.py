@@ -18,8 +18,9 @@ CONFIG_FILE = "/home/pi/communion-project/python/sensor_config.json"
 config_lock = threading.Lock()
 
 # Will be loaded from config or auto-calibrated
-RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]  # Default touched values
-RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # Default idle values
+RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]   # max_pressure: low raw value (hard touch)
+RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # trigger_threshold: = RAW_IDLE - CALIBRATION_BUFFER
+RAW_IDLE = [None] * 12                                         # raw_idle: actual measured minimum when untouched
 
 # Hardware thresholds (MPR121 chip settings, 0-255, lower=more sensitive)
 # Using Bare Conductive defaults optimized for plants: 40/20 (more sensitive than Adafruit default 12/6)
@@ -39,11 +40,12 @@ RETRY_DELAY = 2  # seconds between retries
 CALIBRATION_INTERVAL_HOURS = 0  # 0 = startup only, N = recalibrate every N hours
 CALIBRATION_BUFFER = 2          # Subtract this from lowest idle value to set trigger_threshold
 _last_calibration_time = None
+is_calibrating = False           # Pauses main loop during calibration to avoid I2C conflicts
 
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER
+    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -58,26 +60,33 @@ def load_config():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.load(f)
 
+            # Top-level settings (load buffer first — needed for recomputing thresholds below)
+            CALIBRATION_INTERVAL_HOURS = config.get("calibration_interval_hours", CALIBRATION_INTERVAL_HOURS)
+            CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
+
             # Load thresholds for each sensor
             for i in range(12):
                 sensor_key = f"sensor_{i}"
                 if sensor_key in config:
-                    # Software thresholds (trigger_threshold and max_pressure)
-                    # Fall back to old naming for backward compatibility
                     RAW_MIN[i] = config[sensor_key].get("max_pressure",
                                  config[sensor_key].get("min_value", RAW_MIN[i]))
-                    RAW_MAX[i] = config[sensor_key].get("trigger_threshold",
-                                 config[sensor_key].get("max_value", RAW_MAX[i]))
 
                     # Hardware thresholds (MPR121 chip sensitivity, 0-255)
                     HW_TOUCH_THRESHOLD[i] = config[sensor_key].get("touch_threshold", HW_TOUCH_THRESHOLD[i])
                     HW_RELEASE_THRESHOLD[i] = config[sensor_key].get("release_threshold", HW_RELEASE_THRESHOLD[i])
 
-            # Top-level settings
-            CALIBRATION_INTERVAL_HOURS = config.get("calibration_interval_hours", CALIBRATION_INTERVAL_HOURS)
-            CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
+                    # Load raw_idle if present, then recompute trigger_threshold from it
+                    # This means changing calibration_buffer in the config instantly updates thresholds
+                    idle = config[sensor_key].get("raw_idle", None)
+                    if idle is not None:
+                        RAW_IDLE[i] = idle
+                        RAW_MAX[i] = max(int(idle - CALIBRATION_BUFFER), 0)
+                    else:
+                        # No raw_idle yet (pre-first-calibration) — use stored trigger_threshold directly
+                        RAW_MAX[i] = config[sensor_key].get("trigger_threshold",
+                                     config[sensor_key].get("max_value", RAW_MAX[i]))
 
-            print(f"✓ Config loaded from {CONFIG_FILE}")
+            print(f"✓ Config loaded from {CONFIG_FILE} (buffer={CALIBRATION_BUFFER})")
             return True
 
     except Exception as e:
@@ -136,6 +145,21 @@ class ConfigFileHandler(FileSystemEventHandler):
                 if load_config():
                     success = True
                     apply_hardware_thresholds()  # Apply hardware thresholds after reload
+
+                    # Check for recalibrate_now flag — set to true in config to trigger on-demand
+                    try:
+                        with open(CONFIG_FILE, 'r') as f:
+                            cfg = json.load(f)
+                        if cfg.get("recalibrate_now", False):
+                            print("🔧 recalibrate_now flag detected — starting calibration...")
+                            # Clear the flag first so it doesn't re-trigger
+                            cfg["recalibrate_now"] = False
+                            with open(CONFIG_FILE, 'w') as f:
+                                json.dump(cfg, f, indent=2)
+                            threading.Thread(target=calibrate_sensors, daemon=True).start()
+                    except Exception as e:
+                        print(f"⚠ Error checking recalibrate_now: {e}")
+
                     break
                 if attempt < 4:
                     time.sleep(0.15)  # Slightly longer between retries
@@ -306,10 +330,12 @@ def read_sensor_with_retry(mpr121, sensor_index, max_attempts=3):
 
 def calibrate_sensors(duration=10.0):
     """
-    Calibrate sensors by finding minimum (idle) raw values over duration seconds.
+    Calibrate sensors by finding minimum idle raw values over duration seconds.
     trigger_threshold = lowest_raw_value - CALIBRATION_BUFFER
     Returns calibrated RAW_MAX array.
     """
+    global is_calibrating
+    is_calibrating = True
     buffer = CALIBRATION_BUFFER
     print(f"\n=== CALIBRATION MODE ===")
     print(f"Sampling sensors for {duration} seconds (buffer={buffer})...")
@@ -333,22 +359,24 @@ def calibrate_sensors(duration=10.0):
         sample_count += 1
         time.sleep(0.01)  # 10ms sampling
 
-    # Calculate calibrated RAW_MAX values (min - buffer)
-    calibrated_max = [max(int(min_val - buffer), 0) for min_val in min_values]
+    # Store raw idle minimums and calculate trigger_threshold = raw_idle - buffer
+    global RAW_MAX, RAW_IDLE
+    for i in range(12):
+        if min_values[i] != float('inf'):
+            RAW_IDLE[i] = int(min_values[i])
+    calibrated_max = [max(int(idle - buffer), 0) if idle is not None else 0 for idle in RAW_IDLE]
+    RAW_MAX = calibrated_max
 
     print(f"Calibration complete! ({sample_count} samples)\n")
     print("Detected calibrated values per sensor:")
     for i in range(12):
-        print(f"  sensor_{i}: max_pressure={RAW_MIN[i]}, trigger_threshold={calibrated_max[i]}")
-
-    # Update global RAW_MAX with calibrated values
-    global RAW_MAX
-    RAW_MAX = calibrated_max
+        print(f"  sensor_{i}: raw_idle={RAW_IDLE[i]}, trigger_threshold={calibrated_max[i]} (idle - {buffer})")
 
     # Save only trigger_threshold to config — all other values are preserved as-is
     print("\n💾 Saving calibrated trigger_thresholds to config...")
     save_calibration_thresholds()
 
+    is_calibrating = False
     return calibrated_max
 
 
@@ -367,12 +395,15 @@ def save_calibration_thresholds():
                 with open(CONFIG_FILE, 'r') as f:
                     existing = json.load(f)
 
-            # Only update trigger_threshold per sensor
+            # Update trigger_threshold and raw_idle per sensor
+            # raw_idle is stored so changing calibration_buffer instantly recomputes thresholds
             for i in range(12):
                 sensor_key = f"sensor_{i}"
                 if sensor_key not in existing:
                     existing[sensor_key] = {}
                 existing[sensor_key]["trigger_threshold"] = int(RAW_MAX[i])
+                if RAW_IDLE[i] is not None:
+                    existing[sensor_key]["raw_idle"] = int(RAW_IDLE[i])
 
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(existing, f, indent=2)
@@ -558,6 +589,11 @@ try:
 
     while True:
         try:
+            # Pause polling during calibration to avoid I2C conflicts
+            if is_calibrating:
+                time.sleep(0.1)
+                continue
+
             # Poll all 12 channels
             for i in range(9,12):
                 try:

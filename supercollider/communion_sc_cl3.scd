@@ -45,7 +45,7 @@
 
 // ========== END TUNING ==========
 
-s.options.sampleRate = 48000;
+s.options.sampleRate = 44100;
 s.options.numOutputBusChannels = 2;
 s.options.numInputBusChannels = 0;  // No input needed
 s.options.device = "hw:3";  // USB Audio card 3
@@ -127,7 +127,7 @@ s.waitForBoot({
     }).add;
 
     // Strings Plant synth - for chord building (root, third, fifth, octave)
-    SynthDef(\stringsPlant, { |bufnum, amp=0.6, rate=1, gate=1, out=0, atk=0.05, rel=0.8|
+    SynthDef(\stringsPlant, { |bufnum, amp=0.03, rate=1, gate=1, out=0, atk=0.05, rel=0.8|
         var rateScale = BufRateScale.kr(bufnum) * rate;
         var src = PlayBuf.ar(1, bufnum, rateScale, startPos: 0, loop: 0);
         var eg = EnvGen.kr(Env.asr(atk, 1.0, rel), gate, doneAction: 2);
@@ -404,7 +404,7 @@ s.waitForBoot({
                 if (rootSynth.notNil) { rootSynth.free };
                 rootSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.6,
+                    \amp, 0.01,
                     \rate, 1.0,  // Root note (0 semitones)
                     \atk, 0.05,
                     \rel, 0.8
@@ -420,7 +420,7 @@ s.waitForBoot({
                 if (thirdSynth.notNil) { thirdSynth.free };
                 thirdSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.5,
+                    \amp, 0.01,
                     \rate, 4.midiratio,  // Major third (4 semitones)
                     \atk, 0.05,
                     \rel, 0.8
@@ -436,7 +436,7 @@ s.waitForBoot({
                 if (fifthSynth.notNil) { fifthSynth.free };
                 fifthSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.5,
+                    \amp, 0.01,
                     \rate, 7.midiratio,  // Perfect fifth (7 semitones)
                     \atk, 0.05,
                     \rel, 0.8
@@ -452,7 +452,7 @@ s.waitForBoot({
                 if (octaveSynth.notNil) { octaveSynth.free };
                 octaveSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.4,
+                    \amp, 0.01,
                     \rate, 12.midiratio,  // Octave (12 semitones)
                     \atk, 0.05,
                     \rel, 0.8
