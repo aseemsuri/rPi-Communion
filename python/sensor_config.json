@@ -26,10 +26,10 @@
   },
   "sensor_3": {
     "max_pressure": 45,
-    "trigger_threshold": 89,
+    "trigger_threshold": 88,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 92
+    "raw_idle": 91
   },
   "sensor_4": {
     "max_pressure": 45,
@@ -82,9 +82,9 @@
   },
   "sensor_11": {
     "max_pressure": 45,
-    "trigger_threshold": 90,
+    "trigger_threshold": 89,
     "touch_threshold": 100,
     "release_threshold": 40,
-    "raw_idle": 93
+    "raw_idle": 92
   }
 }
