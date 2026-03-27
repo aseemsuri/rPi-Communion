@@ -9,6 +9,7 @@
 (
 // ========== TUNING PARAMETERS ==========
 // Per-instrument settings: indices 0-11 (touch0 through touch11)
+~totalVol = 0.25;  // Master volume (0.0-1.0); also set via /masterVol OSC from Python
 
 ~touchOnThresh = [
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
@@ -49,16 +50,16 @@
 
 // ========== END TUNING ==========
 
-s.options.sampleRate = 44100;
+s.options.sampleRate = 48000;
 s.options.numOutputBusChannels = 2;
 s.options.numInputBusChannels = 0;  // No input needed
-s.options.device = "hw:3";  // USB Audio card 3
-s.options.blockSize = 128;        // Lower = more responsive (default is 64)
-s.options.hardwareBufferSize = 128;  // Match JACK buffer
+s.options.device = "hw:1";  // USB Audio card 1
+s.options.blockSize = 1024;        // Lower = more responsive (default is 64)
+s.options.hardwareBufferSize = 1024;  // Match JACK buffer
 
 // Force JACK to use the correct device via inDevice/outDevice
-s.options.inDevice = "hw:3";
-s.options.outDevice = "hw:3";
+s.options.inDevice = "hw:1";
+s.options.outDevice = "hw:1";
 
 //s.options.device = "system";
 
@@ -148,6 +149,11 @@ s.waitForBoot({
         Out.ar(reverbBus, sig * reverbSend);
     }).add;
 
+    SynthDef(\masterVol, { |out=0, vol=1|
+        var sig = In.ar(out, 2);
+        ReplaceOut.ar(out, sig * vol);
+    }).add;
+
     s.sync;
 
     // ========== TOUCH HANDLER FACTORIES ==========
@@ -163,8 +169,8 @@ s.waitForBoot({
         var lastEma = 0.0;
         var pressed = false;
         var synth = nil;
-        //var lastTriggerTime = 0;
-        //var debounceTime = 0.01;  // 300ms minimum between triggers
+        var lastTriggerTime = 0;
+        var debounceTime = 0.2;  // 200ms minimum between triggers
 
         var ampMap = { |v|
             v.linlin(onThresh, 100.0, 0.1, 1.0).clip(0, 1)
@@ -187,13 +193,11 @@ s.waitForBoot({
             risingEdge = (ema > onThresh) and: ((ema - lastEma) > deltaMin);
             fallingEdge = (ema < offThresh);
 
-            if (risingEdge and: pressed.not) {
-                // Check debounce timer to prevent double-triggering
-          //      if ((Main.elapsedTime - lastTriggerTime) > debounceTime) {
+            if (risingEdge and: pressed.not and: { (Main.elapsedTime - lastTriggerTime) > debounceTime }) {
                 pressed = true;
-            //        lastTriggerTime = Main.elapsedTime;
+                lastTriggerTime = Main.elapsedTime;
 
-                if (synth.notNil) { synth.free };
+                if (synth.notNil) { synth.set(\gate, 0) };
                 
                 synth = Synth(\basicSampler, [
                     \bufnum, bufferObj.bufnum,
@@ -240,6 +244,8 @@ s.waitForBoot({
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
+        var lastTriggerTime = 0;
+        var debounceTime = 0.2;
 
         var ampMap = { |v|
             0.9  // Fixed amplitude (not touch-sensitive)
@@ -270,12 +276,13 @@ s.waitForBoot({
             risingEdge = potentialRisingEdge;
             fallingEdge = (ema < offThresh);
 
-            if (risingEdge and: pressed.not) {
+            if (risingEdge and: pressed.not and: { (Main.elapsedTime - lastTriggerTime) > debounceTime }) {
                 pressed = true;
+                lastTriggerTime = Main.elapsedTime;
                 currentNote = ~baseNote + ~moneyPlantNotes.choose;
                 rate = (currentNote - ~baseNote).midiratio;
 
-                if (synth.notNil) { synth.free };
+                if (synth.notNil) { synth.set(\gate, 0) };
 
                 synth = Synth(\moneyPlant, [
                     \bufnum, bufferObj.bufnum,
@@ -283,7 +290,7 @@ s.waitForBoot({
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
                     \atk, 0.001,
-                    \rel, 0.015
+                    \rel, 0.1
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -322,6 +329,8 @@ s.waitForBoot({
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
+        var lastTriggerTime = 0;
+        var debounceTime = 0.2;
 
         var ampMap = { |v|
             0.9  // Fixed amplitude (not touch-sensitive)
@@ -353,14 +362,14 @@ s.waitForBoot({
                 currentNote = ~baseNote + ~flowerPlantNotes.choose;
                 rate = (currentNote - ~baseNote).midiratio;
 
-                if (synth.notNil) { synth.free };
+                if (synth.notNil) { synth.set(\gate, 0) };
 
                 synth = Synth(\flowerPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, 0.9,
                     \rate, rate,
                     \atk, 0.001,
-                    \rel, 0.015
+                    \rel, 0.1
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -394,6 +403,8 @@ s.waitForBoot({
         var pressed = false;
         var synth = nil;
         var currentNote = 36;
+        var lastTriggerTime = 0;
+        var debounceTime = 0.2;
 
         var vibratoMap = { |v|
             v.linlin(onThresh, 100.0, 0.0, 1.0).clip(0, 1)
@@ -417,12 +428,13 @@ s.waitForBoot({
             risingEdge = potentialRisingEdge;
             fallingEdge = (ema < offThresh);
 
-            if (risingEdge and: pressed.not) {
+            if (risingEdge and: pressed.not and: { (Main.elapsedTime - lastTriggerTime) > debounceTime }) {
                 pressed = true;
+                lastTriggerTime = Main.elapsedTime;
                 currentNote = (~baseNote - 12) + (~trumpetNotes.choose);
                 rate = (currentNote - ~baseNote).midiratio;
 
-                if (synth.notNil) { synth.free };
+                if (synth.notNil) { synth.set(\gate, 0) };
 
                 synth = Synth(\trumpetPlant, [
                     \bufnum, bufferObj.bufnum,
@@ -430,11 +442,11 @@ s.waitForBoot({
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
                     \reverbBus, ~reverbBus,
-                    \reverbSend, 0.2,
+                    \reverbSend, 0,
                     \atk, 0.7,
                     \dec, 0.3,
                     \sus, 0.1,
-                    \rel, 0.01
+                    \rel, 0.1
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -492,18 +504,18 @@ s.waitForBoot({
 
             ema = (~emaAlpha * raw) + ((1 - ~emaAlpha) * ema);
 
-            ("touch11 ema=%".format(ema.round(0.01))).postln;
+
 
             // Add root note when touch starts
             if ((ema > rootThresh) and: rootPlaying.not) {
                 rootPlaying = true;
                 // Free old synth if it exists
-                if (rootSynth.notNil) { rootSynth.free };
+                if (rootSynth.notNil) { rootSynth.set(\gate, 0) };
                 rootSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp,
                     \rate, 1.0 * 0.5,  // Root note, octave down
-                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
+                    \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 rootSynth.onFree({ rootSynth = nil; rootPlaying = false });
@@ -514,12 +526,12 @@ s.waitForBoot({
             if ((ema > thirdThresh) and: thirdPlaying.not and: rootPlaying) {
                 thirdPlaying = true;
                 // Free old synth if it exists
-                if (thirdSynth.notNil) { thirdSynth.free };
+                if (thirdSynth.notNil) { thirdSynth.set(\gate, 0) };
                 thirdSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp-0.02,
                     \rate, 4.midiratio,  // Major third (4 semitones)
-                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
+                    \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 thirdSynth.onFree({ thirdSynth = nil; thirdPlaying = false });
@@ -530,12 +542,12 @@ s.waitForBoot({
             if ((ema > fifthThresh) and: fifthPlaying.not and: thirdPlaying) {
                 fifthPlaying = true;
                 // Free old synth if it exists
-                if (fifthSynth.notNil) { fifthSynth.free };
+                if (fifthSynth.notNil) { fifthSynth.set(\gate, 0) };
                 fifthSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp-0.05,
                     \rate, 7.midiratio,  // Perfect fifth (7 semitones)
-                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
+                    \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 fifthSynth.onFree({ fifthSynth = nil; fifthPlaying = false });
@@ -546,12 +558,12 @@ s.waitForBoot({
             if ((ema > octaveThresh) and: octavePlaying.not and: fifthPlaying) {
                 octavePlaying = true;
                 // Free old synth if it exists
-                if (octaveSynth.notNil) { octaveSynth.free };
+                if (octaveSynth.notNil) { octaveSynth.set(\gate, 0) };
                 octaveSynth = Synth(\stringsPlant, [
                     \bufnum, bufferObj.bufnum,
                     \amp, stringsAmp-0.05,
                     \rate, 12.midiratio,  // Octave (12 semitones)
-                    \reverbBus, ~reverbBus, \reverbSend, 0.4,
+                    \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
                 octaveSynth.onFree({ octaveSynth = nil; octavePlaying = false });
@@ -625,7 +637,18 @@ s.waitForBoot({
     ~warmerSynth = Synth(\warmer, [\amp, 0.001]);
 
     // Start shared reverb at tail of node tree (processes after all instruments)
-    ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 20, \revtime, 5, \damp, 0.5], addAction: \addToTail);
+    // ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 20, \revtime, 5, \damp, 0.5], addAction: \addToTail);
+
+    // Master volume — sits after reverb at very end of chain
+    ~masterVolSynth = Synth(\masterVol, [\out, 0, \vol, ~totalVol], addAction: \addToTail);
+
+    // OSC listener so Python can set master volume at runtime
+    OSCdef(\masterVolHandler, { |msg|
+        var vol = msg[1].clip(0.0, 1.0);
+        ~totalVol = vol;
+        ~masterVolSynth.set(\vol, vol);
+        ("masterVol set to: " ++ vol).postln;
+    }, '/masterVol');
 
     "✓ Ready! Listening on /touch0 through /touch11".postln;
 });

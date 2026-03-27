@@ -1,20 +1,21 @@
 {
+  "master_volume": 0.25,
   "calibration_interval_hours": 4,
   "calibration_buffer": 3,
   "recalibrate_now": false,
   "sensor_0": {
     "max_pressure": 45,
-    "trigger_threshold": 105,
+    "trigger_threshold": 0,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 108
+    "raw_idle": 0
   },
   "sensor_1": {
     "max_pressure": 45,
-    "trigger_threshold": 80,
+    "trigger_threshold": 0,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 83
+    "raw_idle": 0
   },
   "sensor_2": {
     "max_pressure": 45,
@@ -32,38 +33,38 @@
   },
   "sensor_4": {
     "max_pressure": 45,
-    "trigger_threshold": 95,
+    "trigger_threshold": 91,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 98
+    "raw_idle": 94
   },
   "sensor_5": {
     "max_pressure": 45,
-    "trigger_threshold": 88,
+    "trigger_threshold": 87,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 91
+    "raw_idle": 90
   },
   "sensor_6": {
-    "max_pressure": 45,
-    "trigger_threshold": 89,
-    "touch_threshold": 40,
-    "release_threshold": 20,
-    "raw_idle": 92
-  },
-  "sensor_7": {
     "max_pressure": 45,
     "trigger_threshold": 90,
     "touch_threshold": 40,
     "release_threshold": 20,
     "raw_idle": 93
   },
-  "sensor_8": {
+  "sensor_7": {
     "max_pressure": 45,
-    "trigger_threshold": 89,
+    "trigger_threshold": 87,
     "touch_threshold": 40,
     "release_threshold": 20,
-    "raw_idle": 92
+    "raw_idle": 90
+  },
+  "sensor_8": {
+    "max_pressure": 45,
+    "trigger_threshold": 86,
+    "touch_threshold": 40,
+    "release_threshold": 20,
+    "raw_idle": 89
   },
   "sensor_9": {
     "max_pressure": 45,
@@ -81,9 +82,9 @@
   },
   "sensor_11": {
     "max_pressure": 45,
-    "trigger_threshold": 91,
+    "trigger_threshold": 90,
     "touch_threshold": 100,
     "release_threshold": 40,
-    "raw_idle": 94
+    "raw_idle": 93
   }
 }

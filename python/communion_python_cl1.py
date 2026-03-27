@@ -39,13 +39,14 @@ RETRY_DELAY = 2  # seconds between retries
 # ---- CALIBRATION ----
 CALIBRATION_INTERVAL_HOURS = 0  # 0 = startup only, N = recalibrate every N hours
 CALIBRATION_BUFFER = 2          # Subtract this from lowest idle value to set trigger_threshold
+MASTER_VOLUME = 0.8              # Default master volume (0.0-1.0)
 _last_calibration_time = None
 is_calibrating = False           # Pauses main loop during calibration to avoid I2C conflicts
 
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER
+    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -63,6 +64,7 @@ def load_config():
             # Top-level settings (load buffer first — needed for recomputing thresholds below)
             CALIBRATION_INTERVAL_HOURS = config.get("calibration_interval_hours", CALIBRATION_INTERVAL_HOURS)
             CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
+            MASTER_VOLUME = config.get("master_volume", MASTER_VOLUME)
 
             # Load thresholds for each sensor
             for i in range(12):
@@ -180,18 +182,9 @@ def start_config_watcher():
 
 
 def reset_i2c_bus():
-    """Reset the I2C bus by reloading the kernel module."""
-    try:
-        print("Resetting I2C bus...")
-        subprocess.run(['sudo', 'rmmod', 'i2c_bcm2835'], check=False)
-        time.sleep(0.5)
-        subprocess.run(['sudo', 'modprobe', 'i2c_bcm2835'], check=True)
-        time.sleep(1)
-        print("I2C bus reset complete")
-        return True
-    except Exception as e:
-        print(f"Could not reset I2C bus: {e}")
-        return False
+    """Soft reset - wait for bus to recover naturally."""
+    time.sleep(1)
+    return True
 
 
 def configure_mpr121_filters(mpr121):
@@ -282,6 +275,8 @@ def initialize_mpr121_with_retry():
 mpr121 = initialize_mpr121_with_retry()
 
 smoothed_values = [0.0] * 12
+last_sent_values = [None] * 12
+OSC_SEND_THRESHOLD = 0.3  # Only send OSC if value changed by this much
 
 # ---- SETUP OSC CLIENT ----
 osc_ip = "127.0.0.1"
@@ -582,6 +577,8 @@ try:
     # Start periodic calibration timer (picks up calibration_interval_hours from config)
     start_calibration_timer()
 
+    client.send_message("/masterVol", MASTER_VOLUME)
+    print(f"masterVol sent: {MASTER_VOLUME}")
     print("\nStarting main loop... Press Ctrl+C to exit.\n")
     
     consecutive_errors = 0
@@ -604,9 +601,6 @@ try:
                     # Map raw sensor value to 0-100 range
                     raw_mapped = map_touch_value(raw_value, RAW_MIN[i], RAW_MAX[i])
 
-                    # Debug output for sensor 10 - show ALL values including idle
-                    if i == 9:
-                        print(f"DEBUG sensor_9: raw={raw_value}, trigger={RAW_MAX[i]}, pressure={RAW_MIN[i]}, out={raw_mapped:.1f}")
 
                     # Spike filter
                     # raw_mapped = apply_spike_filter(raw_mapped, smoothed_values[i], MAX_DELTA)
