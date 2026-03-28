@@ -282,7 +282,7 @@ s.waitForBoot({
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
                     \atk, 0.001,
-                    \rel, 0.015
+                    \rel, 0.005
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -432,7 +432,7 @@ s.waitForBoot({
                     \atk, 0.7,
                     \dec, 0.3,
                     \sus, 0.1,
-                    \rel, 0.01
+                    \rel, 0.05
                 ]);
 
                 synth.onFree({ synth = nil });
@@ -464,7 +464,7 @@ s.waitForBoot({
         var stringsAtk  = 0.1;
         var stringsDec  = 1.5;  // time to decay from peak to sustain level
         var stringsSus  = 0.5;  // holds at 50% while held
-        var stringsRel  = 0.5;
+        var stringsRel  = 1.0;
         var stringsAmp  = 0.1;
 
         var ema = 0.0;
@@ -504,7 +504,6 @@ s.waitForBoot({
                     \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
-                rootSynth.onFree({ rootSynth = nil; rootPlaying = false });
                 (">>> " ++ touchKey ++ " ROOT added (ema=%)".format(ema.round(0.1))).postln;
             };
 
@@ -520,7 +519,6 @@ s.waitForBoot({
                     \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
-                thirdSynth.onFree({ thirdSynth = nil; thirdPlaying = false });
                 (">>> " ++ touchKey ++ " THIRD added (ema=%)".format(ema.round(0.1))).postln;
             };
 
@@ -536,7 +534,6 @@ s.waitForBoot({
                     \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
-                fifthSynth.onFree({ fifthSynth = nil; fifthPlaying = false });
                 (">>> " ++ touchKey ++ " FIFTH added (ema=%)".format(ema.round(0.1))).postln;
             };
 
@@ -552,26 +549,25 @@ s.waitForBoot({
                     \reverbBus, ~reverbBus, \reverbSend, 0,
                     \atk, stringsAtk, \dec, stringsDec, \sus, stringsSus, \rel, stringsRel
                 ]);
-                octaveSynth.onFree({ octaveSynth = nil; octavePlaying = false });
                 (">>> " ++ touchKey ++ " OCTAVE added (ema=%)".format(ema.round(0.1))).postln;
             };
 
             // Release all notes when hand lifts
             if (ema < offThresh) {
                 if (rootPlaying) {
-                    if (rootSynth.notNil) { rootSynth.free };
+                    if (rootSynth.notNil) { rootSynth.set(\gate, 0) };
                     rootPlaying = false;
                 };
                 if (thirdPlaying) {
-                    if (thirdSynth.notNil) { thirdSynth.free };
+                    if (thirdSynth.notNil) { thirdSynth.set(\gate, 0) };
                     thirdPlaying = false;
                 };
                 if (fifthPlaying) {
-                    if (fifthSynth.notNil) { fifthSynth.free };
+                    if (fifthSynth.notNil) { fifthSynth.set(\gate, 0) };
                     fifthPlaying = false;
                 };
                 if (octavePlaying) {
-                    if (octaveSynth.notNil) { octaveSynth.free };
+                    if (octaveSynth.notNil) { octaveSynth.set(\gate, 0) };
                     octavePlaying = false;
                 };
                 ema = 0.0;
