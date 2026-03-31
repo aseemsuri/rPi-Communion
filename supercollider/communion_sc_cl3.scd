@@ -435,8 +435,6 @@ s.waitForBoot({
                     \rel, 0.05
                 ]);
 
-                synth.onFree({ synth = nil });
-
                 (">>> " ++ touchKey ++ " TRIGGER: note=%, rate=%"
                     .format(currentNote, rate.round(0.001))).postln;
             };
@@ -468,6 +466,7 @@ s.waitForBoot({
         var stringsAmp  = 0.1;
 
         var ema = 0.0;
+        var lastEma = 0.0;
         var rootSynth = nil;
         var thirdSynth = nil;
         var fifthSynth = nil;
@@ -479,6 +478,7 @@ s.waitForBoot({
 
         // Thresholds for adding notes
         var rootThresh = 1.0;     // Root plays immediately on touch
+        var rootDelta  = 1.0;     // Minimum EMA rise to retrigger root
         var thirdThresh = 15.0;   // Third added at 25%
         var fifthThresh = 40.0;   // Fifth added at 50%
         var octaveThresh = 60.0;  // Octave added at 75%
@@ -488,12 +488,11 @@ s.waitForBoot({
             raw = (msg.size > 1 and: { msg[1].isNumber })
                 .if({ msg[1].asFloat }, { 0.0 });
 
+            lastEma = ema;
             ema = (~emaAlpha * raw) + ((1 - ~emaAlpha) * ema);
 
-
-
-            // Add root note when touch starts
-            if ((ema > rootThresh) and: rootPlaying.not) {
+            // Add root note when touch starts — delta guard prevents retrigger from EMA oscillation
+            if ((ema > rootThresh) and: rootPlaying.not and: ((ema - lastEma) > rootDelta)) {
                 rootPlaying = true;
                 // Free old synth if it exists
                 if (rootSynth.notNil) { rootSynth.free };

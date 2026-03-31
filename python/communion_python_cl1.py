@@ -30,7 +30,7 @@ HW_RELEASE_THRESHOLD = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]  # Defau
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
 MAX_DELTA = 10
-POLL_INTERVAL = 0.02  # 20ms polling
+POLL_INTERVAL = 0.01  # 10ms polling
 
 # ---- RETRY SETTINGS ----
 MAX_RETRIES = 5
@@ -584,6 +584,15 @@ try:
     consecutive_errors = 0
     MAX_CONSECUTIVE_ERRORS = 10
 
+    # Per-sensor smoothing alpha (higher = more responsive, lower = more smoothed)
+    SENSOR_ALPHA = {
+        7:  SMOOTHING_ALPHA,
+        8:  SMOOTHING_ALPHA,
+        9:  0.3,            # moneyPlant
+        10: SMOOTHING_ALPHA,  # trumpet
+        11: 0.2,            # strings — more smoothing to prevent oscillation
+    }
+
     while True:
         try:
             # Pause polling during calibration to avoid I2C conflicts
@@ -591,8 +600,8 @@ try:
                 time.sleep(0.1)
                 continue
 
-            # Poll all 12 channels
-            for i in range(9,12):
+            # Poll sensors 7-11
+            for i in range(7, 12):
                 try:
                     raw_value = read_sensor_with_retry(mpr121, i)
                     if raw_value is None:
@@ -606,12 +615,16 @@ try:
                     # raw_mapped = apply_spike_filter(raw_mapped, smoothed_values[i], MAX_DELTA)
 
                     # Exponential moving average smoothing
-                    smoothed_values[i] = (SMOOTHING_ALPHA * raw_mapped +
-                                         (1 - SMOOTHING_ALPHA) * smoothed_values[i])
+                    alpha = SENSOR_ALPHA.get(i, SMOOTHING_ALPHA)
+                    smoothed_values[i] = (alpha * raw_mapped +
+                                         (1 - alpha) * smoothed_values[i])
 
                     # Send OSC message
                     osc_path = f"/touch{i}"
                     client.send_message(osc_path, smoothed_values[i])
+
+                    if i == 11:
+                        print(f"sensor9: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f}")
 
                     # Reset error counter on successful read
                     consecutive_errors = 0
