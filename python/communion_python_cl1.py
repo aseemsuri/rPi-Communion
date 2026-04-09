@@ -195,7 +195,6 @@ def configure_mpr121_filters(mpr121):
     Registers:
     - CONFIG1/AFE1 (0x5C): FFI (First Filter Iterations)
     - CONFIG2/AFE2 (0x5D): CDT (Charge Discharge Time) and SFI (Second Filter Iterations)
-
     Settings:
     - FFI_10 (0x01): 10 samples for first-level filtering
     - SFI_10 (0x02): 10 samples for second-level filtering
@@ -623,7 +622,7 @@ try:
                     osc_path = f"/touch{i}"
                     client.send_message(osc_path, smoothed_values[i])
 
-                    if i == 11:
+                    if i == 9:
                         print(f"sensor9: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f}")
 
                     # Reset error counter on successful read
