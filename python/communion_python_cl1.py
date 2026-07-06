@@ -21,16 +21,23 @@ config_lock = threading.Lock()
 RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]   # max_pressure: low raw value (hard touch)
 RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # trigger_threshold: = RAW_IDLE - CALIBRATION_BUFFER
 RAW_IDLE = [None] * 12                                         # raw_idle: actual measured minimum when untouched
+CALIBRATION_BUFFERS = [2] * 12                                 # per-sensor calibration buffer, loaded from config
 
 # Hardware thresholds (MPR121 chip settings, 0-255, lower=more sensitive)
 # Using Bare Conductive defaults optimized for plants: 40/20 (more sensitive than Adafruit default 12/6)
-HW_TOUCH_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40]  # Default: 40
-HW_RELEASE_THRESHOLD = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]  # Default: 20
+HW_TOUCH_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 2]  # Default: 40
+HW_RELEASE_THRESHOLD = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 2]  # Default: 20
 
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
 MAX_DELTA = 10
 POLL_INTERVAL = 0.01  # 10ms polling
+
+# ---- PROXIMITY (ROD) SENSORS ----
+# Sensors listed here use baseline-delta mode instead of absolute touch mapping.
+# Set HW_TOUCH_THRESHOLD to 2-5 for these sensors in sensor_config.json.
+PROXIMITY_SENSORS = set()   # e.g. {7} to enable proximity on sensor 7
+PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100% signal
 
 # ---- RETRY SETTINGS ----
 MAX_RETRIES = 5
@@ -38,7 +45,7 @@ RETRY_DELAY = 2  # seconds between retries
 
 # ---- CALIBRATION ----
 CALIBRATION_INTERVAL_HOURS = 0  # 0 = startup only, N = recalibrate every N hours
-CALIBRATION_BUFFER = 2          # Subtract this from lowest idle value to set trigger_threshold
+CALIBRATION_BUFFER = 1         # Subtract this from lowest idle value to set trigger_threshold
 MASTER_VOLUME = 0.8              # Default master volume (0.0-1.0)
 _last_calibration_time = None
 is_calibrating = False           # Pauses main loop during calibration to avoid I2C conflicts
@@ -46,7 +53,7 @@ is_calibrating = False           # Pauses main loop during calibration to avoid 
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME
+    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -66,6 +73,11 @@ def load_config():
             CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
             MASTER_VOLUME = config.get("master_volume", MASTER_VOLUME)
 
+            # Per-sensor buffer array overrides global
+            buffers_arr = config.get("calibration_buffers", [CALIBRATION_BUFFER] * 12)
+            for i in range(12):
+                CALIBRATION_BUFFERS[i] = buffers_arr[i] if i < len(buffers_arr) else CALIBRATION_BUFFER
+
             # Load thresholds for each sensor
             for i in range(12):
                 sensor_key = f"sensor_{i}"
@@ -79,10 +91,12 @@ def load_config():
 
                     # Load raw_idle if present, then recompute trigger_threshold from it
                     # This means changing calibration_buffer in the config instantly updates thresholds
+                    CALIBRATION_BUFFERS[i] = config[sensor_key].get("calibration_buffer", CALIBRATION_BUFFERS[i])
+
                     idle = config[sensor_key].get("raw_idle", None)
                     if idle is not None:
                         RAW_IDLE[i] = idle
-                        RAW_MAX[i] = max(int(idle - CALIBRATION_BUFFER), 0)
+                        RAW_MAX[i] = max(int(idle - CALIBRATION_BUFFERS[i]), 0)
                     else:
                         # No raw_idle yet (pre-first-calibration) — use stored trigger_threshold directly
                         RAW_MAX[i] = config[sensor_key].get("trigger_threshold",
@@ -190,44 +204,95 @@ def reset_i2c_bus():
 def configure_mpr121_filters(mpr121):
     """
     Configure MPR121 filter settings optimized for plant sensing.
-    Based on Bare Conductive Arduino library defaults that worked with Max/MSP.
+    Mirrors Bare Conductive Touch Board setup exactly:
+      1. Set FFI_10, SFI_10, CDT_4US globally
+      2. Wait 1s for baseline to stabilize
+      3. Run autoSetElectrodes — chip measures each electrode's actual capacitance
+         and sets optimal CDC/CDT per electrode individually (AN3869)
+
+    The per-electrode auto-config is what makes the Bare Conductive board work with
+    ungrounded users — each plant is tuned to its own capacitance rather than a
+    global CDT estimate.
 
     Registers:
-    - CONFIG1/AFE1 (0x5C): FFI (First Filter Iterations)
-    - CONFIG2/AFE2 (0x5D): CDT (Charge Discharge Time) and SFI (Second Filter Iterations)
-    Settings:
-    - FFI_10 (0x01): 10 samples for first-level filtering
-    - SFI_10 (0x02): 10 samples for second-level filtering
-    - CDT_4US (0x04): 4 microsecond charge time - "reasonable for larger capacitances" (succulents!)
+    - CONFIG1/AFE1 (0x5C): FFI
+    - CONFIG2/AFE2 (0x5D): CDT + SFI
+    - AUTO_CFG0 (0x7B): ACE=1, ARE=1 — enable auto-config + auto-reconfig
+    - USL (0x7D), LSL (0x7E), TL (0x7F): voltage limits for 3.3V supply (AN3869)
     """
     try:
         # MPR121 register addresses
-        MPR121_CONFIG1 = 0x5C  # Also called AFE1
-        MPR121_CONFIG2 = 0x5D  # Also called AFE2
+        MPR121_CONFIG1   = 0x5C
+        MPR121_CONFIG2   = 0x5D
+        MPR121_AUTO_CFG0 = 0x7B  # Auto-Config Control 0
+        MPR121_USL       = 0x7D  # Upper Side Limit
+        MPR121_LSL       = 0x7E  # Lower Side Limit
+        MPR121_TL        = 0x7F  # Target Level
+
+        buf = bytearray(1)
 
         # Read current register values
-        current_config1 = mpr121._i2c_device.read(MPR121_CONFIG1, 1)[0]
-        current_config2 = mpr121._i2c_device.read(MPR121_CONFIG2, 1)[0]
+        with mpr121.i2c_device as i2c:
+            i2c.write_then_readinto(bytes([MPR121_CONFIG1]), buf)
+            current_config1 = buf[0]
+            i2c.write_then_readinto(bytes([MPR121_CONFIG2]), buf)
+            current_config2 = buf[0]
 
-        # Configure CONFIG1: Set FFI_10 (bits 6-7)
-        # FFI_10 = 0x01, shifted left 6 bits = 0x40
-        new_config1 = (current_config1 & 0x3F) | (0x01 << 6)
+        # CONFIG1: FFI_18 (bits 7:6 = 10) — more filter iterations for proximity sensitivity
+        new_config1 = (current_config1 & 0x3F) | (0x02 << 6)
 
-        # Configure CONFIG2: Set CDT_4US (bits 5-7) and SFI_10 (bits 3-4)
-        # CDT_4US = 0x04, shifted left 5 bits = 0x80
-        # SFI_10 = 0x02, shifted left 3 bits = 0x10
-        temp_config2 = (current_config2 & 0x1F) | (0x04 << 5)  # Set CDT
-        new_config2 = (temp_config2 & 0xE7) | (0x02 << 3)       # Set SFI
+        # CONFIG2: CDT_32US (bits 7:5 = 111) and SFI_10 (bits 4:3 = 10)
+        # CDT_32US (vs default 4US) dramatically increases proximity range on large electrodes/rods
+        temp_config2 = (current_config2 & 0x1F) | (0x07 << 5)
+        new_config2  = (temp_config2 & 0xE7) | (0x02 << 3)
 
-        # Write new values (need to stop electrode sensing first)
-        mpr121._i2c_device.write(bytes([0x5E, 0x00]))  # Stop (ECR = 0)
-        time.sleep(0.01)
-        mpr121._i2c_device.write(bytes([MPR121_CONFIG1, new_config1]))
-        mpr121._i2c_device.write(bytes([MPR121_CONFIG2, new_config2]))
-        mpr121._i2c_device.write(bytes([0x5E, 0x8F]))  # Restart (ECR = 0x8F, baseline tracking + 12 electrodes)
+        # Auto-config voltage limits for 3.3V supply (Freescale AN3869)
+        # USL = (VDD - 0.7) / VDD * 256 = (3.3 - 0.7) / 3.3 * 256 = 202
+        # LSL = 0.65 * USL = 131
+        # TL  = 0.90 * USL = 182
+        usl = 0xCA  # 202
+        lsl = 0x83  # 131
+        tl  = 0xB6  # 182
 
-        print(f"✓ MPR121 filters configured: CONFIG1=0x{new_config1:02X}, CONFIG2=0x{new_config2:02X}")
-        print("  (FFI_10, SFI_10, CDT_4US - optimized for plant capacitance)")
+        # AUTO_CFG0: ACE=1 (bit6), ARE=1 (bit5), FFI_18 (bits1:0 = 10)
+        auto_cfg0 = 0x62
+
+        with mpr121.i2c_device as i2c:
+            # Stop electrode sensing
+            i2c.write(bytes([0x5E, 0x00]))
+            time.sleep(0.01)
+
+            # Write filter config
+            i2c.write(bytes([MPR121_CONFIG1, new_config1]))
+            i2c.write(bytes([MPR121_CONFIG2, new_config2]))
+
+            # Slow baseline tracking: MHD_R/F = 1, NHD_R/F = 1, NCL/FDL = 0
+            # Prevents baseline from chasing a slowly approaching hand (cancelling the delta)
+            i2c.write(bytes([0x2B, 0x01]))  # MHD_R
+            i2c.write(bytes([0x2C, 0x01]))  # NHD_R
+            i2c.write(bytes([0x2D, 0x00]))  # NCL_R
+            i2c.write(bytes([0x2E, 0x00]))  # FDL_R
+            i2c.write(bytes([0x2F, 0x01]))  # MHD_F
+            i2c.write(bytes([0x30, 0x01]))  # NHD_F
+            i2c.write(bytes([0x31, 0xFF]))  # NCL_F — very slow baseline fall
+            i2c.write(bytes([0x32, 0x02]))  # FDL_F
+
+            # Write auto-config voltage limits
+            i2c.write(bytes([MPR121_USL, usl]))
+            i2c.write(bytes([MPR121_LSL, lsl]))
+            i2c.write(bytes([MPR121_TL,  tl]))
+
+            # Enable auto-config — runs per-electrode tuning on restart
+            i2c.write(bytes([MPR121_AUTO_CFG0, auto_cfg0]))
+
+            # Restart with 12 electrodes active
+            i2c.write(bytes([0x5E, 0x8F]))
+
+        # Wait outside the lock — 1s stabilization before auto-config runs
+        time.sleep(1.0)
+
+        print(f"✓ MPR121 configured: CONFIG1=0x{new_config1:02X}, CONFIG2=0x{new_config2:02X}")
+        print("  (FFI_18, SFI_10, CDT_32US, slow baseline tracking, autoSetElectrodes)")
 
     except Exception as e:
         print(f"⚠ Warning: Could not configure MPR121 filters: {e}")
@@ -277,11 +342,25 @@ smoothed_values = [0.0] * 12
 last_sent_values = [None] * 12
 OSC_SEND_THRESHOLD = 0.3  # Only send OSC if value changed by this much
 
-# ---- SETUP OSC CLIENT ----
-osc_ip = "127.0.0.1"
-#osc_ip = "192.168.1.177"
-osc_port = 57120
-client = SimpleUDPClient(osc_ip, osc_port)
+# ---- SETUP OSC CLIENTS ----
+# Toggle these to control where OSC is sent
+SEND_TO_LOCAL = True   # 127.0.0.1 — local SC on Pi
+SEND_TO_MAC   = True   # MAC_IP — remote Mac running Ableton/Max
+
+LOCAL_IP   = "127.0.0.1"
+LOCAL_PORT = 57120
+MAC_IP     = "192.168.1.177"
+MAC_PORT   = 57120
+
+local_client = SimpleUDPClient(LOCAL_IP, LOCAL_PORT)
+mac_client   = SimpleUDPClient(MAC_IP, MAC_PORT)
+
+
+def send_osc(path, value):
+    if SEND_TO_LOCAL:
+        local_client.send_message(path, value)
+    if SEND_TO_MAC:
+        mac_client.send_message(path, value)
 
 
 def map_touch_value(raw_value, raw_min, raw_max, out_min=0, out_max=100, reverse=True):
@@ -358,13 +437,16 @@ def calibrate_sensors(duration=10.0):
     for i in range(12):
         if min_values[i] != float('inf'):
             RAW_IDLE[i] = int(min_values[i])
-    calibrated_max = [max(int(idle - buffer), 0) if idle is not None else 0 for idle in RAW_IDLE]
+    calibrated_max = [
+        max(int(idle - CALIBRATION_BUFFERS[i]), 0) if idle is not None else 0
+        for i, idle in enumerate(RAW_IDLE)
+    ]
     RAW_MAX = calibrated_max
 
     print(f"Calibration complete! ({sample_count} samples)\n")
     print("Detected calibrated values per sensor:")
     for i in range(12):
-        print(f"  sensor_{i}: raw_idle={RAW_IDLE[i]}, trigger_threshold={calibrated_max[i]} (idle - {buffer})")
+        print(f"  sensor_{i}: raw_idle={RAW_IDLE[i]}, trigger_threshold={calibrated_max[i]} (idle - {CALIBRATION_BUFFERS[i]})")
 
     # Save only trigger_threshold to config — all other values are preserved as-is
     print("\n💾 Saving calibrated trigger_thresholds to config...")
@@ -554,7 +636,7 @@ def start_osc_server():
 
 
 try:
-    print(f"OSC Client ready: {osc_ip}:{osc_port}")
+    print(f"OSC Client ready — local: {LOCAL_IP}:{LOCAL_PORT} ({'on' if SEND_TO_LOCAL else 'off'}), mac: {MAC_IP}:{MAC_PORT} ({'on' if SEND_TO_MAC else 'off'})")
 
     # Load config first to get max_pressure, hardware thresholds, and calibration interval
     # (trigger_threshold from config is ignored — we always calibrate fresh on boot)
@@ -576,7 +658,7 @@ try:
     # Start periodic calibration timer (picks up calibration_interval_hours from config)
     start_calibration_timer()
 
-    client.send_message("/masterVol", MASTER_VOLUME)
+    send_osc("/masterVol", MASTER_VOLUME)
     print(f"masterVol sent: {MASTER_VOLUME}")
     print("\nStarting main loop... Press Ctrl+C to exit.\n")
     
@@ -587,9 +669,11 @@ try:
     SENSOR_ALPHA = {
         7:  SMOOTHING_ALPHA,
         8:  SMOOTHING_ALPHA,
-        9:  0.3,            # moneyPlant
-        10: SMOOTHING_ALPHA,  # trumpet
-        11: 0.2,            # strings — more smoothing to prevent oscillation
+        #9:  0.3,            # moneyPlant
+        9: SMOOTHING_ALPHA, #moneyplant-mac
+        10: SMOOTHING_ALPHA,  # trumpet, bass-mac
+        #11: 0.2,            # strings — more smoothing to prevent oscillation
+        11: 0.6, #trumpet-mac
     }
 
     while True:
@@ -606,8 +690,16 @@ try:
                     if raw_value is None:
                         continue
 
+                    # Send raw value over OSC
+                    send_osc(f"/mprraw{i}", raw_value)
+
                     # Map raw sensor value to 0-100 range
-                    raw_mapped = map_touch_value(raw_value, RAW_MIN[i], RAW_MAX[i])
+                    if i in PROXIMITY_SENSORS:
+                        baseline = mpr121.baseline_data(i)
+                        delta = baseline - raw_value
+                        raw_mapped = max(0.0, min(100.0, delta / PROXIMITY_MAX_DELTA * 100.0))
+                    else:
+                        raw_mapped = map_touch_value(raw_value, RAW_MIN[i], RAW_MAX[i])
 
 
                     # Spike filter
@@ -619,10 +711,9 @@ try:
                                          (1 - alpha) * smoothed_values[i])
 
                     # Send OSC message
-                    osc_path = f"/touch{i}"
-                    client.send_message(osc_path, smoothed_values[i])
+                    send_osc(f"/touch{i}", smoothed_values[i])
 
-                    if i == 9:
+                    if i == 11:
                         print(f"sensor9: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f}")
 
                     # Reset error counter on successful read
