@@ -201,98 +201,49 @@ def reset_i2c_bus():
     return True
 
 
-def configure_mpr121_filters(mpr121):
+def configure_mpr121_filters(i2c, address=0x5A):
     """
-    Configure MPR121 filter settings optimized for plant sensing.
-    Mirrors Bare Conductive Touch Board setup exactly:
-      1. Set FFI_10, SFI_10, CDT_4US globally
-      2. Wait 1s for baseline to stabilize
-      3. Run autoSetElectrodes — chip measures each electrode's actual capacitance
-         and sets optimal CDC/CDT per electrode individually (AN3869)
-
-    The per-electrode auto-config is what makes the Bare Conductive board work with
-    ungrounded users — each plant is tuned to its own capacitance rather than a
-    global CDT estimate.
-
-    Registers:
-    - CONFIG1/AFE1 (0x5C): FFI
-    - CONFIG2/AFE2 (0x5D): CDT + SFI
-    - AUTO_CFG0 (0x7B): ACE=1, ARE=1 — enable auto-config + auto-reconfig
-    - USL (0x7D), LSL (0x7E), TL (0x7F): voltage limits for 3.3V supply (AN3869)
+    Configure MPR121 filter settings via raw busio.I2C (bypasses adafruit_mpr121 internals).
+    - FFI_18, CDT_16US, SFI_10: more filtering + longer charge time for larger electrodes
+    - Slow baseline tracking (MHD/NHD/NCL): prevents baseline chasing a slow approach
     """
     try:
-        # MPR121 register addresses
-        MPR121_CONFIG1   = 0x5C
-        MPR121_CONFIG2   = 0x5D
-        MPR121_AUTO_CFG0 = 0x7B  # Auto-Config Control 0
-        MPR121_USL       = 0x7D  # Upper Side Limit
-        MPR121_LSL       = 0x7E  # Lower Side Limit
-        MPR121_TL        = 0x7F  # Target Level
+        MPR121_CONFIG1 = 0x5C
+        MPR121_CONFIG2 = 0x5D
 
-        buf = bytearray(1)
+        def reg_write(reg, val):
+            while not i2c.try_lock():
+                pass
+            try:
+                i2c.writeto(address, bytes([reg, val]))
+            finally:
+                i2c.unlock()
 
-        # Read current register values
-        with mpr121.i2c_device as i2c:
-            i2c.write_then_readinto(bytes([MPR121_CONFIG1]), buf)
-            current_config1 = buf[0]
-            i2c.write_then_readinto(bytes([MPR121_CONFIG2]), buf)
-            current_config2 = buf[0]
+        # Stop electrode sensing before writing config registers
+        reg_write(0x5E, 0x00)
+        time.sleep(0.01)
 
-        # CONFIG1: FFI_18 (bits 7:6 = 10) — more filter iterations for proximity sensitivity
-        new_config1 = (current_config1 & 0x3F) | (0x02 << 6)
+        # FFI_18 (bits 7:6 = 10) + CDC_16uA (bits 5:0 = 010000) — 18 filter iterations, default charge current
+        reg_write(MPR121_CONFIG1, 0x90)
+        # CDT_1US (bits 7:5 = 010) + SFI_10 (bits 4:3 = 10) + ESI_1ms (bits 2:0 = 000)
+        # Lower CDT keeps idle values low so proximity signal has headroom to rise
+        reg_write(MPR121_CONFIG2, 0x50)
 
-        # CONFIG2: CDT_32US (bits 7:5 = 111) and SFI_10 (bits 4:3 = 10)
-        # CDT_32US (vs default 4US) dramatically increases proximity range on large electrodes/rods
-        temp_config2 = (current_config2 & 0x1F) | (0x07 << 5)
-        new_config2  = (temp_config2 & 0xE7) | (0x02 << 3)
+        # Slow baseline tracking — prevents baseline chasing a slow approach
+        reg_write(0x2B, 0x01)  # MHD_R
+        reg_write(0x2C, 0x01)  # NHD_R
+        reg_write(0x2D, 0x00)  # NCL_R
+        reg_write(0x2E, 0x00)  # FDL_R
+        reg_write(0x2F, 0x01)  # MHD_F
+        reg_write(0x30, 0x01)  # NHD_F
+        reg_write(0x31, 0xFF)  # NCL_F — very slow baseline fall
+        reg_write(0x32, 0x02)  # FDL_F
 
-        # Auto-config voltage limits for 3.3V supply (Freescale AN3869)
-        # USL = (VDD - 0.7) / VDD * 256 = (3.3 - 0.7) / 3.3 * 256 = 202
-        # LSL = 0.65 * USL = 131
-        # TL  = 0.90 * USL = 182
-        usl = 0xCA  # 202
-        lsl = 0x83  # 131
-        tl  = 0xB6  # 182
-
-        # AUTO_CFG0: ACE=1 (bit6), ARE=1 (bit5), FFI_18 (bits1:0 = 10)
-        auto_cfg0 = 0x62
-
-        with mpr121.i2c_device as i2c:
-            # Stop electrode sensing
-            i2c.write(bytes([0x5E, 0x00]))
-            time.sleep(0.01)
-
-            # Write filter config
-            i2c.write(bytes([MPR121_CONFIG1, new_config1]))
-            i2c.write(bytes([MPR121_CONFIG2, new_config2]))
-
-            # Slow baseline tracking: MHD_R/F = 1, NHD_R/F = 1, NCL/FDL = 0
-            # Prevents baseline from chasing a slowly approaching hand (cancelling the delta)
-            i2c.write(bytes([0x2B, 0x01]))  # MHD_R
-            i2c.write(bytes([0x2C, 0x01]))  # NHD_R
-            i2c.write(bytes([0x2D, 0x00]))  # NCL_R
-            i2c.write(bytes([0x2E, 0x00]))  # FDL_R
-            i2c.write(bytes([0x2F, 0x01]))  # MHD_F
-            i2c.write(bytes([0x30, 0x01]))  # NHD_F
-            i2c.write(bytes([0x31, 0xFF]))  # NCL_F — very slow baseline fall
-            i2c.write(bytes([0x32, 0x02]))  # FDL_F
-
-            # Write auto-config voltage limits
-            i2c.write(bytes([MPR121_USL, usl]))
-            i2c.write(bytes([MPR121_LSL, lsl]))
-            i2c.write(bytes([MPR121_TL,  tl]))
-
-            # Enable auto-config — runs per-electrode tuning on restart
-            i2c.write(bytes([MPR121_AUTO_CFG0, auto_cfg0]))
-
-            # Restart with 12 electrodes active
-            i2c.write(bytes([0x5E, 0x8F]))
-
-        # Wait outside the lock — 1s stabilization before auto-config runs
+        # Restart with 12 electrodes — ECR 0x8C = CL:10, ELEPROX:00, ELE_EN:12
+        reg_write(0x5E, 0x8C)
         time.sleep(1.0)
 
-        print(f"✓ MPR121 configured: CONFIG1=0x{new_config1:02X}, CONFIG2=0x{new_config2:02X}")
-        print("  (FFI_18, SFI_10, CDT_32US, slow baseline tracking, autoSetElectrodes)")
+        print("✓ MPR121 configured: FFI_18, CDT_16US, SFI_10, slow baseline tracking")
 
     except Exception as e:
         print(f"⚠ Warning: Could not configure MPR121 filters: {e}")
@@ -308,7 +259,7 @@ def initialize_mpr121_with_retry():
             mpr121 = adafruit_mpr121.MPR121(i2c)
 
             # Configure advanced filter settings (FFI, SFI, CDT) for plant sensing
-            configure_mpr121_filters(mpr121)
+            configure_mpr121_filters(i2c)
 
             # Configure hardware thresholds from config
             for i in range(12):
