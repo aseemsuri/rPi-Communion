@@ -25,8 +25,8 @@ CALIBRATION_BUFFERS = [2] * 12                                 # per-sensor cali
 
 # Hardware thresholds (MPR121 chip settings, 0-255, lower=more sensitive)
 # Using Bare Conductive defaults optimized for plants: 40/20 (more sensitive than Adafruit default 12/6)
-HW_TOUCH_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 2]  # Default: 40
-HW_RELEASE_THRESHOLD = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 2]  # Default: 20
+HW_TOUCH_THRESHOLD = [40, 40, 40, 40, 40, 40, 40, 40, 40, 2, 2, 2]  # Default: 40
+HW_RELEASE_THRESHOLD = [20, 20, 20, 20, 20, 20, 20, 20, 20, 2, 2, 2]  # Default: 20
 
 # ---- SMOOTHING & FILTERING ----
 SMOOTHING_ALPHA = 0.4
@@ -36,7 +36,7 @@ POLL_INTERVAL = 0.01  # 10ms polling
 # ---- PROXIMITY (ROD) SENSORS ----
 # Sensors listed here use baseline-delta mode instead of absolute touch mapping.
 # Set HW_TOUCH_THRESHOLD to 2-5 for these sensors in sensor_config.json.
-PROXIMITY_SENSORS = set()   # e.g. {7} to enable proximity on sensor 7
+PROXIMITY_SENSORS = {9, 11}    # sensors using proximity (delta from RAW_IDLE) instead of touch mapping
 PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100% signal
 
 # ---- RETRY SETTINGS ----
@@ -225,9 +225,9 @@ def configure_mpr121_filters(i2c, address=0x5A):
 
         # FFI_18 (bits 7:6 = 10) + CDC_16uA (bits 5:0 = 010000) — 18 filter iterations, default charge current
         reg_write(MPR121_CONFIG1, 0x90)
-        # CDT_1US (bits 7:5 = 010) + SFI_10 (bits 4:3 = 10) + ESI_1ms (bits 2:0 = 000)
-        # Lower CDT keeps idle values low so proximity signal has headroom to rise
-        reg_write(MPR121_CONFIG2, 0x50)
+        # CDT_4US (bits 7:5 = 100) + SFI_10 (bits 4:3 = 10) + ESI_1ms (bits 2:0 = 000)
+        # CDT_4US = 4x more sensitive to far-field capacitance than CDT_1US
+        reg_write(MPR121_CONFIG2, 0x90)
 
         # Slow baseline tracking — prevents baseline chasing a slow approach
         reg_write(0x2B, 0x01)  # MHD_R
@@ -364,8 +364,10 @@ def calibrate_sensors(duration=10.0):
     print(f"\n=== CALIBRATION MODE ===")
     print(f"Sampling sensors for {duration} seconds (buffer={buffer})...")
     print("Please keep hands OFF all sensors!\n")
-    # Track minimum values for each sensor
+    # Touch sensors: track minimum idle (trigger fires when value drops below it)
+    # Proximity sensors: track maximum idle (trigger fires when value drops below typical rest)
     min_values = [float('inf')] * 12
+    max_values = [float('-inf')] * 12
 
     start_time = time.time()
     sample_count = 0
@@ -374,8 +376,11 @@ def calibrate_sensors(duration=10.0):
         for i in range(12):
             try:
                 raw_value = read_sensor_with_retry(mpr121, i)
-                if raw_value is not None and raw_value < min_values[i]:
-                    min_values[i] = raw_value
+                if raw_value is not None:
+                    if raw_value < min_values[i]:
+                        min_values[i] = raw_value
+                    if raw_value > max_values[i]:
+                        max_values[i] = raw_value
             except Exception as e:
                 print(f"⚠ Error reading sensor {i} during calibration: {e}")
                 continue
@@ -383,11 +388,16 @@ def calibrate_sensors(duration=10.0):
         sample_count += 1
         time.sleep(0.01)  # 10ms sampling
 
-    # Store raw idle minimums and calculate trigger_threshold = raw_idle - buffer
+    # Store raw idle values and calculate trigger_threshold = raw_idle - buffer
+    # Proximity sensors use max idle so any drop below resting state is detected
     global RAW_MAX, RAW_IDLE
     for i in range(12):
-        if min_values[i] != float('inf'):
-            RAW_IDLE[i] = int(min_values[i])
+        if i in PROXIMITY_SENSORS:
+            if max_values[i] != float('-inf'):
+                RAW_IDLE[i] = int(max_values[i])
+        else:
+            if min_values[i] != float('inf'):
+                RAW_IDLE[i] = int(min_values[i])
     calibrated_max = [
         max(int(idle - CALIBRATION_BUFFERS[i]), 0) if idle is not None else 0
         for i, idle in enumerate(RAW_IDLE)
@@ -646,15 +656,14 @@ try:
 
                     # Map raw sensor value to 0-100 range
                     if i in PROXIMITY_SENSORS:
-                        baseline = mpr121.baseline_data(i)
-                        delta = baseline - raw_value
+                        idle = RAW_IDLE[i] if RAW_IDLE[i] is not None else raw_value
+                        delta = idle - raw_value
                         raw_mapped = max(0.0, min(100.0, delta / PROXIMITY_MAX_DELTA * 100.0))
+                        # Hardware touch bit — precise gate from MPR121 chip threshold
+                        gate = 1 if mpr121[i].value else 0
+                        send_osc(f"/gate{i}", gate)
                     else:
                         raw_mapped = map_touch_value(raw_value, RAW_MIN[i], RAW_MAX[i])
-
-
-                    # Spike filter
-                    # raw_mapped = apply_spike_filter(raw_mapped, smoothed_values[i], MAX_DELTA)
 
                     # Exponential moving average smoothing
                     alpha = SENSOR_ALPHA.get(i, SMOOTHING_ALPHA)
@@ -664,8 +673,8 @@ try:
                     # Send OSC message
                     send_osc(f"/touch{i}", smoothed_values[i])
 
-                    if i == 11:
-                        print(f"sensor9: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f}")
+                    if i in (9, 11):
+                        print(f"sensor{i}: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f} idle={RAW_IDLE[i]}")
 
                     # Reset error counter on successful read
                     consecutive_errors = 0
