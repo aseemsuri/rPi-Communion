@@ -65,6 +65,7 @@ is_calibrating = False           # Pauses main loop during calibration to avoid 
 def load_config():
     """Load sensor configuration from JSON file."""
     global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA
+    global NODE_ID, SEND_TO_LOCAL, SEND_TO_MAC, LOCAL_IP, LOCAL_PORT, MAC_IP, MAC_PORT
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -91,6 +92,16 @@ def load_config():
             for _rk, _rv in config.get("mpr121_registers", {}).items():
                 if _rk in MPR121_REGISTERS:
                     MPR121_REGISTERS[_rk] = int(_rv, 16) if isinstance(_rv, str) else _rv
+
+            # OSC routing + node identity (all optional; absent = keep defaults)
+            NODE_ID = config.get("node_id", NODE_ID)
+            _osc = config.get("osc", {})
+            SEND_TO_LOCAL = _osc.get("send_to_local", SEND_TO_LOCAL)
+            SEND_TO_MAC   = _osc.get("send_to_mac", SEND_TO_MAC)
+            LOCAL_IP   = _osc.get("local_ip", LOCAL_IP)
+            LOCAL_PORT = _osc.get("local_port", LOCAL_PORT)
+            MAC_IP     = _osc.get("mac_ip", MAC_IP)
+            MAC_PORT   = _osc.get("mac_port", MAC_PORT)
 
             # Per-sensor buffer array overrides global
             buffers_arr = config.get("calibration_buffers", [CALIBRATION_BUFFER] * 12)
@@ -305,32 +316,37 @@ def initialize_mpr121_with_retry():
                 sys.exit(1)
 
 
-# ---- SETUP I2C + MPR121 ----
+# ---- OSC CONFIG (defaults; overridden by load_config from sensor_config.json) ----
+NODE_ID       = ""          # e.g. "csn1" — prefixes the MAC send: /touch0 -> /csn1/touch0
+SEND_TO_LOCAL = True        # 127.0.0.1 — local SuperCollider on the Pi
+SEND_TO_MAC   = True        # MAC_IP — remote Mac running Max/Ableton
+LOCAL_IP   = "127.0.0.1"
+LOCAL_PORT = 57120
+MAC_IP     = "192.168.1.177"
+MAC_PORT   = 57120
+
+# Load config BEFORE hardware + OSC setup so registers, thresholds, and OSC routing
+# all come from JSON (the chip config and OSC clients below depend on these values).
+load_config()
+
+# ---- SETUP I2C + MPR121 (register values now come from config) ----
 mpr121 = initialize_mpr121_with_retry()
 
 smoothed_values = [0.0] * 12
 last_sent_values = [None] * 12
 OSC_SEND_THRESHOLD = 0.3  # Only send OSC if value changed by this much
 
-# ---- SETUP OSC CLIENTS ----
-# Toggle these to control where OSC is sent
-SEND_TO_LOCAL = True   # 127.0.0.1 — local SC on Pi
-SEND_TO_MAC   = True   # MAC_IP — remote Mac running Ableton/Max
-
-LOCAL_IP   = "127.0.0.1"
-LOCAL_PORT = 57120
-MAC_IP     = "192.168.1.177"
-MAC_PORT   = 57120
-
+# ---- SETUP OSC CLIENTS (IPs/ports from config) ----
 local_client = SimpleUDPClient(LOCAL_IP, LOCAL_PORT)
 mac_client   = SimpleUDPClient(MAC_IP, MAC_PORT)
 
 
 def send_osc(path, value):
     if SEND_TO_LOCAL:
-        local_client.send_message(path, value)
+        local_client.send_message(path, value)                 # bare path — local SC unchanged
     if SEND_TO_MAC:
-        mac_client.send_message(path, value)
+        mac_path = f"/{NODE_ID}{path}" if NODE_ID else path     # node prefix on the MAC send only
+        mac_client.send_message(mac_path, value)
 
 
 def map_touch_value(raw_value, raw_min, raw_max, out_min=0, out_max=100, reverse=True):

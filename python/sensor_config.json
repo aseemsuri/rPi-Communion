@@ -27,6 +27,16 @@
     "mhd_f": "0x01", "nhd_f": "0x01", "ncl_f": "0xFF", "fdl_f": "0x02",
     "ecr": "0x8C"
   },
+  "node_id": "csn1",
+  "osc": {
+    "_help": "send_to_mac routes /<node_id>/touchN to mac_ip:mac_port. send_to_local also sends bare /touchN to local SC (audio/standalone build).",
+    "send_to_local": true,
+    "send_to_mac": true,
+    "local_ip": "127.0.0.1",
+    "local_port": 57120,
+    "mac_ip": "192.168.1.177",
+    "mac_port": 57120
+  },
   "sensor_0": {
     "max_pressure": 45,
     "trigger_threshold": 0,
