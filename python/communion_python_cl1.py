@@ -227,7 +227,8 @@ def configure_mpr121_filters(i2c, address=0x5A):
         reg_write(MPR121_CONFIG1, 0x90)
         # CDT_4US (bits 7:5 = 100) + SFI_10 (bits 4:3 = 10) + ESI_1ms (bits 2:0 = 000)
         # CDT_4US = 4x more sensitive to far-field capacitance than CDT_1US
-        reg_write(MPR121_CONFIG2, 0x90)
+        reg_write(MPR121_CONFIG2, 0xB0)
+        #BIG RODS - 0xB0, hanging - 0x90, touch - 0x50
 
         # Slow baseline tracking — prevents baseline chasing a slow approach
         reg_write(0x2B, 0x01)  # MHD_R
@@ -673,7 +674,7 @@ try:
                     # Send OSC message
                     send_osc(f"/touch{i}", smoothed_values[i])
 
-                    if i in (9, 11):
+                    if i ==9:
                         print(f"sensor{i}: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f} idle={RAW_IDLE[i]}")
 
                     # Reset error counter on successful read

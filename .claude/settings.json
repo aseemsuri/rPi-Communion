@@ -10,7 +10,26 @@
       "Bash(ssh-add ~/.ssh/id_ed25519)",
       "Bash(ssh -T git@github.com)",
       "Bash(ssh-add -l)",
-      "Read(//Users/aseemsuri/**)"
+      "Read(//Users/aseemsuri/**)",
+      "Bash(scp /Users/aseemsuri/pi-mount/supercollider/communion_sc_cl3.scd pi@raspberrypi.local:/home/pi/communion-project/supercollider/communion_sc_cl3.scd)",
+      "Bash(scp /Users/aseemsuri/pi-mount/python/communion_python_cl1.py pi@raspberrypi.local:/home/pi/communion-project/python/communion_python_cl1.py)",
+      "WebFetch(domain:www.aseemsuri.io)",
+      "WebFetch(domain:www.bareconductive.com)",
+      "Bash(curl -s \"https://api.github.com/repos/BareConductive/mpr121/contents\")",
+      "Bash(python3 -c \"import sys,json; [print\\(x['name']\\) for x in json.load\\(sys.stdin\\)]\")",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.nxp.com)",
+      "Bash(ssh pi@raspberrypi.local \"python3 -c \\\\\"import adafruit_mpr121; import inspect; print\\(inspect.getfile\\(adafruit_mpr121\\)\\)\\\\\" && python3 -c \\\\\"import adafruit_mpr121, busio, board; i2c = busio.I2C\\(board.SCL, board.SDA\\); m = adafruit_mpr121.MPR121\\(i2c\\); print\\(dir\\(m\\)\\)\\\\\"\")",
+      "Bash(ssh pi@raspberrypi.local \"python3 -c \\\\\"import json; c=json.load\\(open\\('/home/pi/communion-project/python/sensor_config.json'\\)\\); print\\(c.get\\('calibration_buffers'\\)\\)\\\\\"\")",
+      "Bash(ssh pi@raspberrypi.local \"grep -n 'CALIBRATION_BUFFER_PER_SENSOR\\\\|buf_used\\\\|calibration_buffers' /home/pi/communion-project/python/communion_python_cl1.py\")",
+      "Bash(ssh -o ConnectTimeout=10 pi@raspberrypi.local \"grep -c 'CALIBRATION_BUFFER_PER_SENSOR' /home/pi/communion-project/python/communion_python_cl1.py\")",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "WebSearch",
+      "Bash(ssh -o ConnectTimeout=10 pi@raspberrypi.local 'cd /home/pi/communion-project 2>/dev/null && echo \"=== REMOTE ===\" && git remote -v && echo \"\" && echo \"=== CURRENT BRANCH + STATUS ===\" && git status -sb | head -20 && echo \"\" && echo \"=== ALL BRANCHES \\(local + remote\\) ===\" && git branch -a && echo \"\" && echo \"=== LOG GRAPH \\(last 15, all branches\\) ===\" && git log --oneline --graph --all --decorate -15')",
+      "Bash(mount)"
     ]
   }
 }

@@ -13,17 +13,17 @@
 
 ~touchOnThresh = [
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-    1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+    1.0, 1.0, 1.0, 1.0, 0.2, 1.0
 ];
 
 ~touchOffThresh = [
     0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-    0.5, 0.5, 0.5, 0.5, 0.5, 0.5
+    0.5, 0.5, 0.5, 0.5, 0.1, 0.5
 ];
 
 ~touchDeltaMin = [
     0.6, 0.6, 0.6, 0.6, 0.6, 0.6,
-    0.6, 0.6, 0.6, 0.9, 0.6, 0.6  // Lowered touch9 from 2.0 to 0.8
+    0.6, 0.6, 0.6, 0.9, 0.1, 0.9  // Lowered touch9 from 2.0 to 0.8
 ];
 
 ~samplePaths = [
@@ -36,9 +36,9 @@
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
     "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
-    "/home/pi/communion-project/supercollider/samples/moneyPlant.wav",
-    "/home/pi/communion-project/supercollider/samples/trumpet.wav",       // touch10 = trumpetPlant
-    "/home/pi/communion-project/supercollider/samples/strings.wav",      // touch11 = stringsPlant
+    "/home/pi/communion-project/supercollider/samples/moneyPlant-ableton.wav",
+    "/home/pi/communion-project/supercollider/samples/strings.wav",       // touch10 = trumpetPlant
+    "/home/pi/communion-project/supercollider/samples/Trumpet-ableton.wav",      // touch11 = stringsPlant
 ];
 
 ~baseNote = 24;
@@ -116,7 +116,7 @@ s.waitForBoot({
     // Trumpet Plant synth - major scale with vibrato
     SynthDef(\trumpetPlant, { |bufnum, amp=1.1, rate=1, gate=1, out=0, reverbBus=0, reverbSend=0, atk=0.06, dec=0.1, sus=0.2, rel=0.06, vibrato=0|
         var rateScale = BufRateScale.kr(bufnum) * rate;
-        var vibLfo = SinOsc.kr(5, 0, vibrato * 0.05);
+        var vibLfo = SinOsc.kr(5, 0, vibrato * 0.25);
         var vibratingRate = rateScale * (1.0 + vibLfo);
         var src = PlayBuf.ar(1, bufnum, vibratingRate, gate, startPos: 0, loop: 0);
         var eg = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction: 2);
@@ -278,7 +278,7 @@ s.waitForBoot({
 
                 synth = Synth(\moneyPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 0.9,
+                    \amp, 0.1,
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
                     \atk, 0.001,
@@ -417,18 +417,19 @@ s.waitForBoot({
 
             if (risingEdge and: pressed.not) {
                 pressed = true;
-                currentNote = (~baseNote - 12) + (~trumpetNotes.choose);
+                //currentNote = (~baseNote - 12) + (~trumpetNotes.choose);
+                currentNote = (~baseNote - 0) + (~trumpetNotes.choose);
                 rate = (currentNote - ~baseNote).midiratio;
 
                 if (synth.notNil) { synth.free };
 
                 synth = Synth(\trumpetPlant, [
                     \bufnum, bufferObj.bufnum,
-                    \amp, 8.0,
+                    \amp, 1.0,
                     \rate, rate,
                     \vibrato, vibratoMap.(ema),
                     \reverbBus, ~reverbBus,
-                    \reverbSend, 0,
+                    \reverbSend, 0.3,
                     \atk, 0.7,
                     \dec, 0.3,
                     \sus, 0.1,
@@ -477,8 +478,8 @@ s.waitForBoot({
         var octavePlaying = false;
 
         // Thresholds for adding notes
-        var rootThresh = 1.0;     // Root plays immediately on touch
-        var rootDelta  = 1.0;     // Minimum EMA rise to retrigger root
+        var rootThresh = 0.2;     // Root plays immediately on touch
+        var rootDelta  = 0.2;     // Minimum EMA rise to retrigger root
         var thirdThresh = 15.0;   // Third added at 25%
         var fifthThresh = 40.0;   // Fifth added at 50%
         var octaveThresh = 60.0;  // Octave added at 75%
@@ -586,13 +587,13 @@ s.waitForBoot({
                 touchKey, i, ~buffers[i], oscPath, i
             );
         } {
-            if (i == 10) {
+            if (i == 11) {
                 // Touch10 = Trumpet Plant with major scale + vibrato
                 ~makeTrumpetHandler.(
                     touchKey, i, ~buffers[i], oscPath, i
                 );
             } {
-                if (i == 11) {
+                if (i == 10) {
                     // Touch11 = Strings Plant with chord building
                     ~makeStringsPlantHandler.(
                         touchKey, i, ~buffers[i], oscPath, i
@@ -618,7 +619,7 @@ s.waitForBoot({
     // ~warmerSynth = Synth(\warmer, [\amp, 0.01]);
 
     // Start shared reverb at tail of node tree (processes after all instruments)
-    // ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 20, \revtime, 5, \damp, 0.5], addAction: \addToTail);
+     ~reverbSynth = Synth(\reverbTail, [\reverbBus, ~reverbBus, \room, 12, \revtime, 1, \damp, 0.5, \amp, 0.2], addAction: \addToTail);
 
     // Master volume — sits after reverb at very end of chain
     ~masterVolSynth = Synth(\masterVol, [\out, 0, \vol, ~totalVol], addAction: \addToTail);
