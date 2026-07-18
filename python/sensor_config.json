@@ -17,6 +17,16 @@
     2
   ],
   "recalibrate_now": false,
+  "proximity_sensors": [9, 11],
+  "proximity_max_delta": 30,
+  "mpr121_registers": {
+    "_help": "CONFIG2 CDT: 0x90=4us(hanging) 0xB0=8us(rods) 0xF0=32us(touch). Full menu in MPR121_REGISTER_REFERENCE.md",
+    "config1": "0x90",
+    "config2": "0xB0",
+    "mhd_r": "0x01", "nhd_r": "0x01", "ncl_r": "0x00", "fdl_r": "0x00",
+    "mhd_f": "0x01", "nhd_f": "0x01", "ncl_f": "0xFF", "fdl_f": "0x02",
+    "ecr": "0x8C"
+  },
   "sensor_0": {
     "max_pressure": 45,
     "trigger_threshold": 0,

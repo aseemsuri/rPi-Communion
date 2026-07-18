@@ -39,6 +39,17 @@ POLL_INTERVAL = 0.01  # 10ms polling
 PROXIMITY_SENSORS = {9, 11}    # sensors using proximity (delta from RAW_IDLE) instead of touch mapping
 PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100% signal
 
+# ---- MPR121 HARDWARE REGISTERS (chip-global, overridable from config) ----
+# See MPR121_REGISTER_REFERENCE.md. Defaults below = current proximity (rod) values.
+# config2 CDT cheat-sheet:  0x90=4us(hanging)   0xB0=8us(BIG RODS)   0xF0=32us(touch)
+MPR121_REGISTERS = {
+    "config1": 0x90,   # FFI_18 + CDC_16uA
+    "config2": 0xB0,   # CDT_8us + SFI_10 + ESI_1ms
+    "mhd_r": 0x01, "nhd_r": 0x01, "ncl_r": 0x00, "fdl_r": 0x00,
+    "mhd_f": 0x01, "nhd_f": 0x01, "ncl_f": 0xFF, "fdl_f": 0x02,
+    "ecr": 0x8C,       # 12 electrodes, baseline tracking on
+}
+
 # ---- RETRY SETTINGS ----
 MAX_RETRIES = 5
 RETRY_DELAY = 2  # seconds between retries
@@ -53,7 +64,7 @@ is_calibrating = False           # Pauses main loop during calibration to avoid 
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS
+    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -72,6 +83,14 @@ def load_config():
             CALIBRATION_INTERVAL_HOURS = config.get("calibration_interval_hours", CALIBRATION_INTERVAL_HOURS)
             CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
             MASTER_VOLUME = config.get("master_volume", MASTER_VOLUME)
+
+            # Proximity mode + MPR121 hardware registers (all optional; absent = keep code defaults)
+            if "proximity_sensors" in config:
+                PROXIMITY_SENSORS = set(config["proximity_sensors"])
+            PROXIMITY_MAX_DELTA = config.get("proximity_max_delta", PROXIMITY_MAX_DELTA)
+            for _rk, _rv in config.get("mpr121_registers", {}).items():
+                if _rk in MPR121_REGISTERS:
+                    MPR121_REGISTERS[_rk] = int(_rv, 16) if isinstance(_rv, str) else _rv
 
             # Per-sensor buffer array overrides global
             buffers_arr = config.get("calibration_buffers", [CALIBRATION_BUFFER] * 12)
@@ -223,28 +242,27 @@ def configure_mpr121_filters(i2c, address=0x5A):
         reg_write(0x5E, 0x00)
         time.sleep(0.01)
 
-        # FFI_18 (bits 7:6 = 10) + CDC_16uA (bits 5:0 = 010000) — 18 filter iterations, default charge current
-        reg_write(MPR121_CONFIG1, 0x90)
-        # CDT_4US (bits 7:5 = 100) + SFI_10 (bits 4:3 = 10) + ESI_1ms (bits 2:0 = 000)
-        # CDT_4US = 4x more sensitive to far-field capacitance than CDT_1US
-        reg_write(MPR121_CONFIG2, 0xB0)
-        #BIG RODS - 0xB0, hanging - 0x90, touch - 0x50
+        R = MPR121_REGISTERS  # loaded from config; see MPR121_REGISTER_REFERENCE.md
 
-        # Slow baseline tracking — prevents baseline chasing a slow approach
-        reg_write(0x2B, 0x01)  # MHD_R
-        reg_write(0x2C, 0x01)  # NHD_R
-        reg_write(0x2D, 0x00)  # NCL_R
-        reg_write(0x2E, 0x00)  # FDL_R
-        reg_write(0x2F, 0x01)  # MHD_F
-        reg_write(0x30, 0x01)  # NHD_F
-        reg_write(0x31, 0xFF)  # NCL_F — very slow baseline fall
-        reg_write(0x32, 0x02)  # FDL_F
+        # CONFIG1 (FFI + CDC),  CONFIG2 (CDT + SFI + ESI)
+        reg_write(MPR121_CONFIG1, R["config1"])
+        reg_write(MPR121_CONFIG2, R["config2"])
 
-        # Restart with 12 electrodes — ECR 0x8C = CL:10, ELEPROX:00, ELE_EN:12
-        reg_write(0x5E, 0x8C)
+        # Baseline tracking — slow fall (ncl_f/fdl_f high) prevents chasing a slow approach
+        reg_write(0x2B, R["mhd_r"])  # MHD_R
+        reg_write(0x2C, R["nhd_r"])  # NHD_R
+        reg_write(0x2D, R["ncl_r"])  # NCL_R
+        reg_write(0x2E, R["fdl_r"])  # FDL_R
+        reg_write(0x2F, R["mhd_f"])  # MHD_F
+        reg_write(0x30, R["nhd_f"])  # NHD_F
+        reg_write(0x31, R["ncl_f"])  # NCL_F
+        reg_write(0x32, R["fdl_f"])  # FDL_F
+
+        # Restart with electrodes enabled (ECR)
+        reg_write(0x5E, R["ecr"])
         time.sleep(1.0)
 
-        print("✓ MPR121 configured: FFI_18, CDT_16US, SFI_10, slow baseline tracking")
+        print(f"✓ MPR121 configured: CONFIG1=0x{R['config1']:02X}, CONFIG2=0x{R['config2']:02X}, ECR=0x{R['ecr']:02X}")
 
     except Exception as e:
         print(f"⚠ Warning: Could not configure MPR121 filters: {e}")
