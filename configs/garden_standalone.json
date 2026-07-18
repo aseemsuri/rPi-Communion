@@ -17,15 +17,12 @@
     2
   ],
   "recalibrate_now": false,
-  "proximity_sensors": [
-    9,
-    11
-  ],
+  "proximity_sensors": [],
   "proximity_max_delta": 30,
   "mpr121_registers": {
-    "_help": "CONFIG2 CDT: 0x90=4us(hanging) 0xB0=8us(rods) 0xF0=32us(touch). Full menu in MPR121_REGISTER_REFERENCE.md",
+    "_help": "GARDEN standalone touch. config2 0xF0=CDT_32us. Full audio build. See MPR121_REGISTER_REFERENCE.md",
     "config1": "0x90",
-    "config2": "0xB0",
+    "config2": "0xF0",
     "mhd_r": "0x01",
     "nhd_r": "0x01",
     "ncl_r": "0x00",
@@ -36,11 +33,11 @@
     "fdl_f": "0x02",
     "ecr": "0x8C"
   },
-  "node_id": "csn1",
+  "node_id": "",
   "osc": {
-    "_help": "send_to_mac routes /<node_id>/touchN to mac_ip:mac_port. send_to_local also sends bare /touchN to local SC (audio/standalone build).",
+    "_help": "STANDALONE garden: audio runs on the Pi. send_to_local -> local SC (bare /touchN). node_id empty = no prefix. Provision with setup_new_pi.sh + communion-sc.",
     "send_to_local": true,
-    "send_to_mac": true,
+    "send_to_mac": false,
     "local_ip": "127.0.0.1",
     "local_port": 57120,
     "mac_ip": "192.168.1.177",
@@ -110,11 +107,11 @@
     "raw_idle": 0
   },
   "sensor_9": {
-    "max_pressure": 320,
-    "trigger_threshold": 1021,
-    "touch_threshold": 60,
-    "release_threshold": 50,
-    "raw_idle": 1023
+    "max_pressure": 45,
+    "trigger_threshold": 0,
+    "touch_threshold": 20,
+    "release_threshold": 10,
+    "raw_idle": 0
   },
   "sensor_10": {
     "max_pressure": 45,
@@ -125,9 +122,9 @@
   },
   "sensor_11": {
     "max_pressure": 45,
-    "trigger_threshold": 1021,
-    "touch_threshold": 60,
-    "release_threshold": 50,
-    "raw_idle": 1023
+    "trigger_threshold": 0,
+    "touch_threshold": 20,
+    "release_threshold": 10,
+    "raw_idle": 0
   }
 }
