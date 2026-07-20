@@ -36,7 +36,7 @@ POLL_INTERVAL = 0.01  # 10ms polling
 # ---- PROXIMITY (ROD) SENSORS ----
 # Sensors listed here use baseline-delta mode instead of absolute touch mapping.
 # Set HW_TOUCH_THRESHOLD to 2-5 for these sensors in sensor_config.json.
-PROXIMITY_SENSORS = {9, 11}    # sensors using proximity (delta from RAW_IDLE) instead of touch mapping
+PROXIMITY_SENSORS = {9, 11}    # sensors using proximity (delta from trigger_threshold) instead of touch mapping
 PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100% signal
 
 # ---- MPR121 HARDWARE REGISTERS (chip-global, overridable from config) ----
@@ -400,7 +400,11 @@ def calibrate_sensors(duration=10.0):
     print(f"Sampling sensors for {duration} seconds (buffer={buffer})...")
     print("Please keep hands OFF all sensors!\n")
     # Touch sensors: track minimum idle (trigger fires when value drops below it)
-    # Proximity sensors: track maximum idle (trigger fires when value drops below typical rest)
+    # Proximity sensors: track maximum idle.
+    # NOTE: do NOT switch proximity to min — a single dropout/glitch read (0) during
+    # calibration poisons min, giving raw_idle=0 and killing the sensor entirely.
+    # Tracking max is the guard against that. The cost is that max also catches the
+    # highest noise spike, so the baseline sits a few counts above true rest.
     min_values = [float('inf')] * 12
     max_values = [float('-inf')] * 12
 
@@ -423,8 +427,9 @@ def calibrate_sensors(duration=10.0):
         sample_count += 1
         time.sleep(0.01)  # 10ms sampling
 
-    # Store raw idle values and calculate trigger_threshold = raw_idle - buffer
-    # Proximity sensors use max idle so any drop below resting state is detected
+    # Store raw idle values and calculate trigger_threshold = raw_idle - buffer.
+    # Both modes work off trigger_threshold: touch maps against it, proximity uses
+    # it as the delta baseline (buffer cancels the max-based idle's noise offset).
     global RAW_MAX, RAW_IDLE
     for i in range(12):
         if i in PROXIMITY_SENSORS:
@@ -691,8 +696,14 @@ try:
 
                     # Map raw sensor value to 0-100 range
                     if i in PROXIMITY_SENSORS:
-                        idle = RAW_IDLE[i] if RAW_IDLE[i] is not None else raw_value
-                        delta = idle - raw_value
+                        # Baseline = trigger_threshold (raw_idle - calibration_buffer).
+                        # raw_idle comes from the MAX sample, which is dropout-safe but
+                        # sits a few counts above true rest; the buffer cancels that
+                        # offset. Set calibration_buffer to ~4-5 for proximity electrodes.
+                        baseline = RAW_MAX[i] if RAW_MAX[i] else RAW_IDLE[i]
+                        if baseline is None:
+                            baseline = raw_value
+                        delta = baseline - raw_value
                         raw_mapped = max(0.0, min(100.0, delta / PROXIMITY_MAX_DELTA * 100.0))
                         # Hardware touch bit — precise gate from MPR121 chip threshold
                         gate = 1 if mpr121[i].value else 0
@@ -708,7 +719,7 @@ try:
                     # Send OSC message
                     send_osc(f"/touch{i}", smoothed_values[i])
 
-                    if i ==9:
+                    if i ==11:
                         print(f"sensor{i}: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f} idle={RAW_IDLE[i]}")
 
                     # Reset error counter on successful read
