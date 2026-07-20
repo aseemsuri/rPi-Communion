@@ -44,7 +44,7 @@ PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100
 # config2 CDT cheat-sheet:  0x90=4us(hanging)   0xB0=8us(BIG RODS)   0xF0=32us(touch)
 MPR121_REGISTERS = {
     "config1": 0x90,   # FFI_18 + CDC_16uA
-    "config2": 0xB0,   # CDT_8us + SFI_10 + ESI_1ms
+    "config2": 0x90,   # CDT_8us + SFI_10 + ESI_1ms
     "mhd_r": 0x01, "nhd_r": 0x01, "ncl_r": 0x00, "fdl_r": 0x00,
     "mhd_f": 0x01, "nhd_f": 0x01, "ncl_f": 0xFF, "fdl_f": 0x02,
     "ecr": 0x8C,       # 12 electrodes, baseline tracking on
@@ -422,7 +422,10 @@ def calibrate_sensors(duration=10.0):
         for i in range(12):
             try:
                 raw_value = read_sensor_with_retry(mpr121, i)
-                if raw_value is not None:
+                # Exclude 0 — a dropout/glitch read comes back as 0 and would poison
+                # the minimum, giving raw_idle=0 and killing the sensor. With 0 filtered,
+                # min safely tracks the true resting floor for touch AND proximity.
+                if raw_value is not None and raw_value > 0:
                     if raw_value < min_values[i]:
                         min_values[i] = raw_value
                     if raw_value > max_values[i]:
@@ -434,17 +437,13 @@ def calibrate_sensors(duration=10.0):
         sample_count += 1
         time.sleep(0.01)  # 10ms sampling
 
-    # Store raw idle values and calculate trigger_threshold = raw_idle - buffer.
-    # Both modes work off trigger_threshold: touch maps against it, proximity uses
-    # it as the delta baseline (buffer cancels the max-based idle's noise offset).
+    # All sensors calibrate to the MINIMUM idle (the true resting floor, now that
+    # 0-dropouts are filtered above). trigger_threshold = raw_idle - buffer, and both
+    # modes work off it: touch maps against it, proximity uses it as the delta baseline.
     global RAW_MAX, RAW_IDLE
     for i in range(12):
-        if i in PROXIMITY_SENSORS:
-            if max_values[i] != float('-inf'):
-                RAW_IDLE[i] = int(max_values[i])
-        else:
-            if min_values[i] != float('inf'):
-                RAW_IDLE[i] = int(min_values[i])
+        if min_values[i] != float('inf'):
+            RAW_IDLE[i] = int(min_values[i])
     calibrated_max = [
         max(int(idle - CALIBRATION_BUFFERS[i]), 0) if idle is not None else 0
         for i, idle in enumerate(RAW_IDLE)
@@ -704,9 +703,9 @@ try:
                     # Map raw sensor value to 0-100 range
                     if i in PROXIMITY_SENSORS:
                         # Baseline = trigger_threshold (raw_idle - calibration_buffer).
-                        # raw_idle comes from the MAX sample, which is dropout-safe but
-                        # sits a few counts above true rest; the buffer cancels that
-                        # offset. Set calibration_buffer to ~4-5 for proximity electrodes.
+                        # raw_idle is the MIN resting value (0-dropouts filtered), so it
+                        # sits at the true floor; a small buffer (~2) is just a deadzone
+                        # so noise at the floor doesn't register. Approach drops below it.
                         baseline = RAW_MAX[i] if RAW_MAX[i] else RAW_IDLE[i]
                         if baseline is None:
                             baseline = raw_value
