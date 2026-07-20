@@ -19,6 +19,7 @@
   "recalibrate_now": false,
   "proximity_sensors": [],
   "proximity_max_delta": 30,
+  "debug_sensor": null,
   "mpr121_registers": {
     "_help": "GARDEN standalone touch. config2 0xF0=CDT_32us. Full audio build. See MPR121_REGISTER_REFERENCE.md",
     "config1": "0x90",

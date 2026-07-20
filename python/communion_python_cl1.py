@@ -61,11 +61,17 @@ MASTER_VOLUME = 0.8              # Default master volume (0.0-1.0)
 _last_calibration_time = None
 is_calibrating = False           # Pauses main loop during calibration to avoid I2C conflicts
 
+# ---- DEBUG ----
+# Set "debug_sensor" in config to a sensor number (0-11) to log that sensor every
+# loop iteration while tuning. Leave null in production — this prints ~100x/sec
+# and will flood journald over a long run.
+DEBUG_SENSOR = None
+
 
 def load_config():
     """Load sensor configuration from JSON file."""
     global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA
-    global NODE_ID, SEND_TO_LOCAL, SEND_TO_MAC, LOCAL_IP, LOCAL_PORT, MAC_IP, MAC_PORT
+    global NODE_ID, SEND_TO_LOCAL, SEND_TO_MAC, LOCAL_IP, LOCAL_PORT, MAC_IP, MAC_PORT, DEBUG_SENSOR
 
     if not os.path.exists(CONFIG_FILE):
         print(f"ℹ Config file not found at {CONFIG_FILE}")
@@ -89,6 +95,7 @@ def load_config():
             if "proximity_sensors" in config:
                 PROXIMITY_SENSORS = set(config["proximity_sensors"])
             PROXIMITY_MAX_DELTA = config.get("proximity_max_delta", PROXIMITY_MAX_DELTA)
+            DEBUG_SENSOR = config.get("debug_sensor", DEBUG_SENSOR)
             for _rk, _rv in config.get("mpr121_registers", {}).items():
                 if _rk in MPR121_REGISTERS:
                     MPR121_REGISTERS[_rk] = int(_rv, 16) if isinstance(_rv, str) else _rv
@@ -719,8 +726,8 @@ try:
                     # Send OSC message
                     send_osc(f"/touch{i}", smoothed_values[i])
 
-                    if i ==11:
-                        print(f"sensor{i}: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f} idle={RAW_IDLE[i]}")
+                    if DEBUG_SENSOR is not None and i == DEBUG_SENSOR:
+                        print(f"sensor{i}: raw={raw_value} mapped={raw_mapped:.1f} smoothed={smoothed_values[i]:.2f} idle={RAW_IDLE[i]} baseline={RAW_MAX[i]}")
 
                     # Reset error counter on successful read
                     consecutive_errors = 0

@@ -19,6 +19,7 @@
   "recalibrate_now": false,
   "proximity_sensors": [],
   "proximity_max_delta": 30,
+  "debug_sensor": null,
   "mpr121_registers": {
     "_help": "ALTAR touch profile (from TightTouch). config2 0xF0=CDT_32us. NOTE: TightTouch also used MPR121 auto-config (not yet supported here) \u2014 re-tune/re-calibrate on altar hardware. See MPR121_REGISTER_REFERENCE.md",
     "config1": "0x90",
