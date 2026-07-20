@@ -34,3 +34,10 @@ Thumbs.db
 # Local config
 .env
 *.local
+
+# Per-box runtime state — NOT tracked.
+# node_id differs per box, and the script writes calibration (raw_idle) back to
+# this file at runtime, so tracking it makes `git pull` conflict on every node.
+# Templates live in configs/ — copy one per box:
+#   cp configs/rods_proximity.json python/sensor_config.json
+python/sensor_config.json
