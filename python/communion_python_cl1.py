@@ -394,7 +394,7 @@ def read_sensor_with_retry(mpr121, sensor_index, max_attempts=3):
     return None
 
 
-def calibrate_sensors(duration=10.0):
+def calibrate_sensors(duration=3.0):
     """
     Calibrate sensors by finding minimum idle raw values over duration seconds.
     trigger_threshold = lowest_raw_value - CALIBRATION_BUFFER
