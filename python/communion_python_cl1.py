@@ -507,6 +507,10 @@ def start_calibration_timer():
     Picks up config changes dynamically — no restart needed.
     """
     global _last_calibration_time
+    # Seed from the startup calibration that just ran. Without this the loop below
+    # resets its reference to "now" every iteration, so the interval never elapses
+    # and periodic calibration never fires.
+    _last_calibration_time = time.time()
 
     def calibration_loop():
         global _last_calibration_time
