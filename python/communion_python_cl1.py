@@ -36,8 +36,15 @@ POLL_INTERVAL = 0.01  # 10ms polling
 # ---- PROXIMITY (ROD) SENSORS ----
 # Sensors listed here use baseline-delta mode instead of absolute touch mapping.
 # Set HW_TOUCH_THRESHOLD to 2-5 for these sensors in sensor_config.json.
-PROXIMITY_SENSORS = {9, 11}    # sensors using proximity (delta from trigger_threshold) instead of touch mapping
+PROXIMITY_SENSORS = {0, 6, 11}    # sensors using proximity (delta from trigger_threshold) instead of touch mapping
 PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100% signal
+
+# ---- ACTIVE ELECTRODES ----
+# Which electrodes the main loop actually polls and sends. Set "active_sensors" in
+# sensor_config.json to only the wired ones — unwired electrodes cost I2C time every
+# pass and float, so a 3-sensor node polling all 12 runs ~4x the bus traffic it needs.
+# Calibration still sweeps all 12 regardless.
+ACTIVE_SENSORS = list(range(12))
 
 # ---- MPR121 HARDWARE REGISTERS (chip-global, overridable from config) ----
 # See MPR121_REGISTER_REFERENCE.md. Defaults below = current proximity (rod) values.
@@ -70,7 +77,7 @@ DEBUG_SENSOR = None
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA
+    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA, ACTIVE_SENSORS
     global NODE_ID, SEND_TO_LOCAL, SEND_TO_MAC, LOCAL_IP, LOCAL_PORT, MAC_IP, MAC_PORT, DEBUG_SENSOR
 
     if not os.path.exists(CONFIG_FILE):
@@ -94,6 +101,8 @@ def load_config():
             # Proximity mode + MPR121 hardware registers (all optional; absent = keep code defaults)
             if "proximity_sensors" in config:
                 PROXIMITY_SENSORS = set(config["proximity_sensors"])
+            if "active_sensors" in config:
+                ACTIVE_SENSORS = sorted(int(s) for s in config["active_sensors"] if 0 <= int(s) <= 11)
             PROXIMITY_MAX_DELTA = config.get("proximity_max_delta", PROXIMITY_MAX_DELTA)
             DEBUG_SENSOR = config.get("debug_sensor", DEBUG_SENSOR)
             for _rk, _rv in config.get("mpr121_registers", {}).items():
@@ -694,8 +703,8 @@ try:
                 time.sleep(0.1)
                 continue
 
-            # Poll sensors 7-11
-            for i in range(7, 12):
+            # Poll the wired electrodes (see ACTIVE_SENSORS / "active_sensors" in config)
+            for i in ACTIVE_SENSORS:
                 try:
                     raw_value = read_sensor_with_retry(mpr121, i)
                     if raw_value is None:
