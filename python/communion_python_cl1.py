@@ -19,7 +19,7 @@ config_lock = threading.Lock()
 
 # Will be loaded from config or auto-calibrated
 RAW_MIN = [45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45]   # max_pressure: low raw value (hard touch)
-RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 98]   # trigger_threshold: = RAW_IDLE - CALIBRATION_BUFFER
+RAW_MAX = [85, 85, 85, 85, 85, 85, 85, 85, 85, 66, 83, 83]   # trigger_threshold: = RAW_IDLE - CALIBRATION_BUFFER
 RAW_IDLE = [None] * 12                                         # raw_idle: actual measured minimum when untouched
 CALIBRATION_BUFFERS = [2] * 12                                 # per-sensor calibration buffer, loaded from config
 
@@ -41,17 +41,20 @@ PROXIMITY_MAX_DELTA = 30    # delta value (baseline - filtered) that maps to 100
 
 # ---- ACTIVE ELECTRODES ----
 # Which electrodes the main loop actually polls and sends. Set "active_sensors" in
-# sensor_config.json to only the wired ones — unwired electrodes cost I2C time every
-# pass and float, so a 3-sensor node polling all 12 runs ~4x the bus traffic it needs.
-# Calibration still sweeps all 12 regardless.
-ACTIVE_SENSORS = list(range(12))
+# sensor_config.json to only the wired ones. An unconnected electrode floats at ~1023
+# (10-bit full scale) and still costs a full I2C transaction every pass — polling all
+# 12 on a sparsely-wired node is what produces the I/O errors on the bus.
+# Default is the single-rod column case; every profile in configs/ sets this
+# explicitly, so this only applies to a config that omits the key.
+# Calibration still sweeps all 12 regardless, so the sensor table stays complete.
+ACTIVE_SENSORS = [11]
 
 # ---- MPR121 HARDWARE REGISTERS (chip-global, overridable from config) ----
 # See MPR121_REGISTER_REFERENCE.md. Defaults below = current proximity (rod) values.
 # config2 CDT cheat-sheet:  0x90=4us(hanging)   0xB0=8us(BIG RODS)   0xF0=32us(touch)
 MPR121_REGISTERS = {
     "config1": 0x90,   # FFI_18 + CDC_16uA
-    "config2": 0x90,   # CDT_8us + SFI_10 + ESI_1ms
+    "config2": 0xB0,   # CDT_8us + SFI_10 + ESI_1ms
     "mhd_r": 0x01, "nhd_r": 0x01, "ncl_r": 0x00, "fdl_r": 0x00,
     "mhd_f": 0x01, "nhd_f": 0x01, "ncl_f": 0xFF, "fdl_f": 0x02,
     "ecr": 0x8C,       # 12 electrodes, baseline tracking on

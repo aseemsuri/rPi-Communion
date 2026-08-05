@@ -12,19 +12,21 @@
     2,
     2,
     2,
+    4,
     2,
-    2,
-    2
+    10
   ],
   "recalibrate_now": false,
   "proximity_sensors": [
-    9,
     11
   ],
-  "proximity_max_delta": 30,
+  "active_sensors": [
+    11
+  ],
+  "proximity_max_delta": 10,
   "debug_sensor": null,
   "mpr121_registers": {
-    "_help": "RODS profile. config2 0xB0=CDT_8us (big rods); use 0x90=CDT_4us for hanging. proximity_sensors use baseline-delta. See MPR121_REGISTER_REFERENCE.md",
+    "_help": "RODS profile - one 1.5in EMT rod on electrode 11. config2 0x90=CDT_4us. active_sensors polls only the wired electrode; unwired ones float at ~1023 and cause I2C errors. See MPR121_REGISTER_REFERENCE.md",
     "config1": "0x90",
     "config2": "0xB0",
     "mhd_r": "0x01",
