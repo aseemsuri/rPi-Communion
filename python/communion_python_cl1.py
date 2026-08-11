@@ -341,7 +341,7 @@ SEND_TO_LOCAL = True        # 127.0.0.1 — local SuperCollider on the Pi
 SEND_TO_MAC   = True        # MAC_IP — remote Mac running Max/Ableton
 LOCAL_IP   = "127.0.0.1"
 LOCAL_PORT = 57120
-MAC_IP     = "192.168.1.177"
+MAC_IP     = "192.168.8.177"
 MAC_PORT   = 57120
 
 # Load config BEFORE hardware + OSC setup so registers, thresholds, and OSC routing

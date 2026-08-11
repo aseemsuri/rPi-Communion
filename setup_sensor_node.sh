@@ -71,7 +71,7 @@ if [ ! -f python/sensor_config.json ]; then
     echo "      nano python/sensor_config.json      # set \"node_id\": \"csn2\""
     echo ""
     echo "    Check the OSC target while you're in there:"
-    echo "      \"osc\": { \"send_to_mac\": true, \"mac_ip\": \"192.168.1.177\", ... }"
+    echo "      \"osc\": { \"send_to_mac\": true, \"mac_ip\": \"192.168.8.177\", ... }"
 else
     echo "Active config found — confirm this box's identity:"
     echo "      grep node_id python/sensor_config.json"

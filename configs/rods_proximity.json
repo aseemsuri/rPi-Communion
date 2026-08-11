@@ -46,7 +46,7 @@
     "send_to_mac": true,
     "local_ip": "127.0.0.1",
     "local_port": 57120,
-    "mac_ip": "192.168.1.177",
+    "mac_ip": "192.168.8.177",
     "mac_port": 57120
   },
   "sensor_0": {
