@@ -67,6 +67,7 @@ RETRY_DELAY = 2  # seconds between retries
 # ---- CALIBRATION ----
 CALIBRATION_INTERVAL_HOURS = 0  # 0 = startup only, N = recalibrate every N hours
 CALIBRATION_BUFFER = 1         # Subtract this from lowest idle value to set trigger_threshold
+CALIBRATION_DURATION = 3.0     # Seconds to sample idle during calibration; "calibration_duration" in config
 MASTER_VOLUME = 0.8              # Default master volume (0.0-1.0)
 _last_calibration_time = None
 is_calibrating = False           # Pauses main loop during calibration to avoid I2C conflicts
@@ -80,7 +81,7 @@ DEBUG_SENSOR = None
 
 def load_config():
     """Load sensor configuration from JSON file."""
-    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA, ACTIVE_SENSORS
+    global RAW_MIN, RAW_MAX, RAW_IDLE, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD, CALIBRATION_INTERVAL_HOURS, CALIBRATION_BUFFER, CALIBRATION_DURATION, MASTER_VOLUME, CALIBRATION_BUFFERS, PROXIMITY_SENSORS, PROXIMITY_MAX_DELTA, ACTIVE_SENSORS
     global NODE_ID, SEND_TO_LOCAL, SEND_TO_MAC, LOCAL_IP, LOCAL_PORT, MAC_IP, MAC_PORT, DEBUG_SENSOR
 
     if not os.path.exists(CONFIG_FILE):
@@ -99,6 +100,7 @@ def load_config():
             # Top-level settings (load buffer first — needed for recomputing thresholds below)
             CALIBRATION_INTERVAL_HOURS = config.get("calibration_interval_hours", CALIBRATION_INTERVAL_HOURS)
             CALIBRATION_BUFFER = config.get("calibration_buffer", CALIBRATION_BUFFER)
+            CALIBRATION_DURATION = float(config.get("calibration_duration", CALIBRATION_DURATION))
             MASTER_VOLUME = config.get("master_volume", MASTER_VOLUME)
 
             # Proximity mode + MPR121 hardware registers (all optional; absent = keep code defaults)
@@ -163,20 +165,29 @@ def save_config():
     """Save current sensor configuration to JSON file."""
     global RAW_MIN, RAW_MAX, HW_TOUCH_THRESHOLD, HW_RELEASE_THRESHOLD
 
-    config = {
-        "calibration_interval_hours": CALIBRATION_INTERVAL_HOURS,
-        "calibration_buffer": CALIBRATION_BUFFER
-    }
-    for i in range(12):
-        config[f"sensor_{i}"] = {
-            "max_pressure": int(RAW_MIN[i]),            # Low raw value (strong touch)
-            "trigger_threshold": int(RAW_MAX[i]),       # High raw value (light touch/idle)
-            "touch_threshold": int(HW_TOUCH_THRESHOLD[i]),      # Hardware sensitivity (0-255, lower=more sensitive)
-            "release_threshold": int(HW_RELEASE_THRESHOLD[i])   # Hardware release threshold (0-255)
-        }
-
     try:
         with config_lock:
+            # Merge into the existing file — never rebuild it. Top-level keys this
+            # function does not own (active_sensors, mpr121_registers, node_id, osc,
+            # proximity_*, debug_sensor, master_volume) must survive, or a single OSC
+            # tweak wipes the box's whole profile. Same contract as
+            # save_calibration_thresholds(). Also preserves per-sensor raw_idle.
+            config = {}
+            if os.path.exists(CONFIG_FILE) and os.path.getsize(CONFIG_FILE) > 0:
+                with open(CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+
+            config["calibration_interval_hours"] = CALIBRATION_INTERVAL_HOURS
+            config["calibration_buffer"] = CALIBRATION_BUFFER
+            for i in range(12):
+                sk = f"sensor_{i}"
+                if sk not in config:
+                    config[sk] = {}
+                config[sk]["max_pressure"] = int(RAW_MIN[i])
+                config[sk]["trigger_threshold"] = int(RAW_MAX[i])
+                config[sk]["touch_threshold"] = int(HW_TOUCH_THRESHOLD[i])
+                config[sk]["release_threshold"] = int(HW_RELEASE_THRESHOLD[i])
+
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(config, f, indent=2)
 
@@ -406,13 +417,15 @@ def read_sensor_with_retry(mpr121, sensor_index, max_attempts=3):
     return None
 
 
-def calibrate_sensors(duration=3.0):
+def calibrate_sensors(duration=None):
     """
     Calibrate sensors by finding minimum idle raw values over duration seconds.
     trigger_threshold = lowest_raw_value - CALIBRATION_BUFFER
     Returns calibrated RAW_MAX array.
     """
     global is_calibrating
+    if duration is None:
+        duration = CALIBRATION_DURATION
     is_calibrating = True
     buffer = CALIBRATION_BUFFER
     print(f"\n=== CALIBRATION MODE ===")
