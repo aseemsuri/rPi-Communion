@@ -727,8 +727,21 @@ def handle_cal_buffer(address, *args):
         CALIBRATION_BUFFERS[i] = buf
         if RAW_IDLE[i] is not None:
             RAW_MAX[i] = max(int(RAW_IDLE[i] - buf), 0)
+        # Write the per-sensor key (which wins on load) AND the array entry, so
+        # the file never shows two different numbers for the same thing.
+        arr = None
+        try:
+            with config_lock:
+                with open(CONFIG_FILE) as f:
+                    arr = json.load(f).get("calibration_buffers")
+        except Exception:
+            pass
+        if not isinstance(arr, list) or len(arr) < 12:
+            arr = [2] * 12
+        arr[i] = buf
         _merge_config({f"sensor_{i}": {"calibration_buffer": buf,
-                                       "trigger_threshold": int(RAW_MAX[i])}})
+                                       "trigger_threshold": int(RAW_MAX[i])},
+                       "calibration_buffers": arr})
         print(f"\U0001f4e5 OSC: sensor_{i} calibration_buffer = {buf} "
               f"-> trigger_threshold {RAW_MAX[i]}")
     except Exception as e:
