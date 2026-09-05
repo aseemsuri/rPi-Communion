@@ -754,6 +754,50 @@ def handle_shutdown(address, *args):
     os.system("sudo poweroff")
 
 
+def handle_proxdelta(address, *args):
+    """/proxdelta <float> — node-level proximity scaling.
+
+    proximity = (baseline - raw) / PROXIMITY_MAX_DELTA * 100, so this is the
+    per-node balance control: long rods produce smaller deltas and want a
+    smaller divisor than short ones. Global feel belongs in Max; this is what
+    keeps the eight rods reading alike as a starting point.
+    """
+    global PROXIMITY_MAX_DELTA
+    try:
+        if not args:
+            return
+        v = float(args[0])
+        if v <= 0:
+            print(f"\u26a0 {address}: must be > 0")
+            return
+        PROXIMITY_MAX_DELTA = v
+        _merge_config({"proximity_max_delta": v})
+        print(f"\U0001f4e5 OSC: proximity_max_delta = {v}")
+    except Exception as e:
+        print(f"\u26a0 Error handling {address}: {e}")
+
+
+def handle_calinterval(address, *args):
+    """/calinterval <hours> — 0 = startup only, N = recalibrate every N hours.
+
+    Set this to 0 before opening. An automatic recalibration that fires while
+    someone is standing at a column folds that body into the idle baseline,
+    and the column then reads near zero for an empty room — silently dead
+    until the next cycle.
+    """
+    global CALIBRATION_INTERVAL_HOURS
+    try:
+        if not args:
+            return
+        v = float(args[0])
+        CALIBRATION_INTERVAL_HOURS = v
+        _merge_config({"calibration_interval_hours": v})
+        print(f"\U0001f4e5 OSC: calibration_interval_hours = {v}"
+              + ("  (startup only)" if v == 0 else ""))
+    except Exception as e:
+        print(f"\u26a0 Error handling {address}: {e}")
+
+
 def start_osc_server():
     """Start OSC server for receiving control messages."""
     dispatcher = Dispatcher()
@@ -771,6 +815,8 @@ def start_osc_server():
 
     dispatcher.map("/recalibrate", handle_recalibrate)
     dispatcher.map("/getconfig", handle_getconfig)
+    dispatcher.map("/proxdelta", handle_proxdelta)
+    dispatcher.map("/calinterval", handle_calinterval)
     dispatcher.map("/shutdown", handle_shutdown)
 
     # Start server on port 57121 (different from SuperCollider's 57120)
@@ -781,6 +827,8 @@ def start_osc_server():
     print(f"🎛 OSC Control Server listening on port 57121")
     print("   /getconfig [i]              - reply with current tuning")
     print("   /sensorX/calbuffer <n>      - proximity deadband, recomputes threshold")
+    print("   /proxdelta <float>          - node proximity scaling")
+    print("   /calinterval <hours>        - 0 = startup only")
     print("   /shutdown                   - power this node down")
     print("   Software thresholds:")
     print("     /sensorX/pressure <value>   - Max pressure point (e.g., /sensor9/pressure 45)")
