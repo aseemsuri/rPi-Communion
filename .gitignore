@@ -41,3 +41,8 @@ Thumbs.db
 # Templates live in configs/ — copy one per box:
 #   cp configs/rods_proximity.json python/sensor_config.json
 python/sensor_config.json
+
+# Ableton sets — samples are hundreds of MB, Dropbox versions those
+*.als
+* Project/
+*.tmws
