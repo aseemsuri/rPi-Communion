@@ -17,9 +17,14 @@
 //             accrete <col> <n> <note>  an extra voice joined a sustained hold
 //             field  <x> <y> <act> <holds>   every tick, for the TD lighting
 //             prox   <p1..p8>                every tick, per-column proximity
+//             gates  <g1..g8>                every tick, per-column contact
 //
 //       proximity controls:  proxon <0|1>      master enable
 //                            proxrange <0..1>  1 = ~3ft, 0 = ~0.5ft
+//
+//             health col <1-8> <0|1>   node alive / gone silent
+//             health alt <1-6> <0|1>   altar electrode alive / silent
+//       send  health                   to re-emit all states (for loadbang)
 //       4 = MIDI, ready for noteout / ctlout:
 //             note <pitch> <vel> <chan>       -> [noteout]
 //             cc   <val> <ctrl> <chan>        -> [ctlout]   (ctlout's own order)
@@ -151,6 +156,17 @@ var pProxOff= pProxOffFar;
 
 var pProxEnable = 1;   // master on/off for the whole proximity layer
 
+// ---- HEALTH ---------------------------------------------------------------
+// No status command needed on the Pi: every node streams touch data
+// continuously, so "is it alive" is just "did anything arrive from it
+// recently". We stamp the frame each value lands and flag anything that has
+// gone quiet. Detects ARRIVAL, not change — a dead node leaves its last value
+// sitting in prox[] forever, which looks identical to a still room.
+var pDeadAfter = 3000;    // ms of silence before a source is called down
+var seenCol = [], seenAlt = [], upCol = [], upAlt = [];
+for (var i = 0; i < 8; i++) { seenCol[i] = -1; upCol[i] = -1; }
+for (var i = 0; i < 6; i++) { seenAlt[i] = -1; upAlt[i] = -1; }
+
 // Proximity notes sit UNDER the contact/hold notes on the same channel, so
 // they get their own velocity range rather than the full 1-127. Velocity is
 // fixed at the moment the note triggers — CC 20 is what moves while it
@@ -175,28 +191,28 @@ function anything() {
     var m = messagename, v = (arguments.length ? arguments[0] : 0), idx;
     if (m.indexOf("touch") === 0) {
         idx = parseInt(m.substring(5), 10) - 1;
-        if (idx >= 0 && idx < N) prox[idx] = v;
+        if (idx >= 0 && idx < N) { prox[idx] = v; seenCol[idx] = frames; }
     } else if (m.indexOf("gate") === 0) {
         idx = parseInt(m.substring(4), 10) - 1;
-        if (idx >= 0 && idx < N) gate[idx] = v;
+        if (idx >= 0 && idx < N) { gate[idx] = v; seenCol[idx] = frames; }
     } else if (m.indexOf("altar") === 0) {
         idx = parseInt(m.substring(5), 10) - 1;
-        if (idx >= 0 && idx < NA) altarV[idx] = v;
+        if (idx >= 0 && idx < NA) { altarV[idx] = v; seenAlt[idx] = frames; }
     }
 }
 
 function touches() {
-    for (var i = 0; i < N && i < arguments.length; i++) prox[i] = arguments[i];
+    for (var i = 0; i < N && i < arguments.length; i++) { prox[i] = arguments[i]; seenCol[i] = frames; }
 }
 
 // Six values at once:  [pak 0. 0. 0. 0. 0. 0.] -> [prepend altar] -> here.
 function altar() {
-    for (var i = 0; i < NA && i < arguments.length; i++) altarV[i] = arguments[i];
+    for (var i = 0; i < NA && i < arguments.length; i++) { altarV[i] = arguments[i]; seenAlt[i] = frames; }
 }
 function altars() { altar.apply(this, arguments); }   // alias
 
 function gates() {
-    for (var i = 0; i < N && i < arguments.length; i++) gate[i] = arguments[i];
+    for (var i = 0; i < N && i < arguments.length; i++) { gate[i] = arguments[i]; seenCol[i] = frames; }
 }
 
 // ---- the field ------------------------------------------------------------
@@ -414,6 +430,21 @@ function processAltar() {
     else if (altState && hot <  pAltOff) { altState = 0; outlet(3, "altar", 0); }
 }
 
+// Emits only on change, so it costs nothing while everything is fine:
+//   health col <1-8> <0|1>
+//   health alt <1-6> <0|1>
+function processHealth() {
+    var lim = Math.round(pDeadAfter / pRate);
+    for (var i = 0; i < N; i++) {
+        var up = (seenCol[i] >= 0 && (frames - seenCol[i]) < lim) ? 1 : 0;
+        if (up !== upCol[i]) { upCol[i] = up; outlet(3, "health", "col", i + 1, up); }
+    }
+    for (var j = 0; j < NA; j++) {
+        var ua = (seenAlt[j] >= 0 && (frames - seenAlt[j]) < lim) ? 1 : 0;
+        if (ua !== upAlt[j]) { upAlt[j] = ua; outlet(3, "health", "alt", j + 1, ua); }
+    }
+}
+
 function tick() {
     frames++;
     pushHist();
@@ -421,6 +452,7 @@ function tick() {
     processProx();
     processPending();
     processAltar();
+    processHealth();
     compute();
     var nx = curX + (tgtX - curX) * pEase;
     var ny = curY + (tgtY - curY) * pEase;
@@ -441,6 +473,11 @@ function tick() {
     // TD lands them as prox1..prox8 in argument order.
     outlet(3, "prox", prox[0], prox[1], prox[2], prox[3],
                       prox[4], prox[5], prox[6], prox[7]);
+
+    // Per-column contact for TD. Proximity peaks DURING a touch, so without
+    // this the lights can't tell "approaching" from "hand on it".
+    outlet(3, "gates", gate[0]?1:0, gate[1]?1:0, gate[2]?1:0, gate[3]?1:0,
+                       gate[4]?1:0, gate[5]?1:0, gate[6]?1:0, gate[7]?1:0);
 
     outlet(2, act);
     outlet(1, curY);
@@ -513,6 +550,14 @@ function setaltar(on, off) {
     pAltOn  = on;
     pAltOff = Math.min(off, on * 0.9);   // proportional, so it survives small values
 }
+function setdeadafter(v) { pDeadAfter = Math.max(200, v); }
+
+// Re-emit every health state, so a display can be populated on loadbang.
+function health() {
+    for (var i = 0; i < N; i++)  outlet(3, "health", "col", i + 1, upCol[i] > 0 ? 1 : 0);
+    for (var j = 0; j < NA; j++) outlet(3, "health", "alt", j + 1, upAlt[j] > 0 ? 1 : 0);
+}
+
 function setproxvel(lo, hi) {
     pProxVelMin = Math.max(1, Math.min(127, lo));
     pProxVelMax = Math.max(pProxVelMin, Math.min(127, hi));
@@ -538,6 +583,12 @@ function dump() {
     for (var j = 0; j < NA; j++) arow += " " + altarV[j];
     post("altar[" + arow + " ]  on>" + pAltOn + " off<" + pAltOff +
          "   gate " + altState + "\n");
+    var hrow = "";
+    for (var i = 0; i < N; i++)  hrow += (upCol[i] > 0 ? " " + (i+1) : " -");
+    var arow2 = "";
+    for (var j = 0; j < NA; j++) arow2 += (upAlt[j] > 0 ? " " + (j+1) : " -");
+    post("health cols[" + hrow + " ]  altar[" + arow2 + " ]  (- = silent >" +
+         pDeadAfter + "ms)\n");
     post("prox " + (pProxEnable ? "ON" : "OFF") + "  range " + pProxRange +
          "  ->  on>" + pProxOn.toFixed(1) + " off<" + pProxOff.toFixed(1) + "\n");
     post("x " + curX + "  y " + curY + "  activity " + act + "\n");
