@@ -639,6 +639,165 @@ def apply_hardware_thresholds():
     print(f"✓ Hardware thresholds applied to MPR121")
 
 
+def _merge_config(updates):
+    """Read-modify-write one or more nested keys without disturbing the rest.
+    Same pattern as save_config: never rebuild the file from scratch."""
+    try:
+        with config_lock:
+            cfg = {}
+            if os.path.exists(CONFIG_FILE) and os.path.getsize(CONFIG_FILE) > 0:
+                with open(CONFIG_FILE, 'r') as f:
+                    cfg = json.load(f)
+            for key, sub in updates.items():
+                if isinstance(sub, dict):
+                    if key not in cfg or not isinstance(cfg[key], dict):
+                        cfg[key] = {}
+                    cfg[key].update(sub)
+                else:
+                    cfg[key] = sub
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(cfg, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"\u26a0 Error merging config: {e}")
+        return False
+
+
+def handle_getconfig(address, *args):
+    """Reply to Max with the current tuning, read from the file on disk.
+
+        /getconfig        every active sensor
+        /getconfig <i>    just sensor i
+
+    Replies per sensor with:
+        /<node>/config/sensor<i> max_pressure trigger_threshold
+                                 touch_threshold release_threshold
+                                 raw_idle calibration_buffer
+    and once with:
+        /<node>/config/node proximity_max_delta calibration_interval_hours
+    """
+    try:
+        with config_lock:
+            with open(CONFIG_FILE, 'r') as f:
+                cfg = json.load(f)
+
+        if args and str(args[0]).lstrip('-').isdigit():
+            idxs = [int(args[0])]
+        else:
+            idxs = cfg.get("active_sensors") or list(range(12))
+
+        buffers = cfg.get("calibration_buffers") or []
+        for i in idxs:
+            sk = f"sensor_{i}"
+            sen = cfg.get(sk, {})
+            # per-sensor buffer wins, then the array, then the scalar
+            buf = sen.get("calibration_buffer")
+            if buf is None:
+                buf = buffers[i] if i < len(buffers) else cfg.get("calibration_buffer", 2)
+            mac_client.send_message(f"/{NODE_ID}/config/{sk}", [
+                int(sen.get("max_pressure", 0)),
+                int(sen.get("trigger_threshold", 0)),
+                int(sen.get("touch_threshold", 0)),
+                int(sen.get("release_threshold", 0)),
+                int(sen.get("raw_idle", 0)),
+                int(buf),
+            ])
+        mac_client.send_message(f"/{NODE_ID}/config/node", [
+            float(cfg.get("proximity_max_delta", 0)),
+            float(cfg.get("calibration_interval_hours", 0)),
+        ])
+        print(f"\U0001f4e4 OSC: sent config for {idxs}")
+    except Exception as e:
+        print(f"\u26a0 Error handling {address}: {e}")
+
+
+def handle_cal_buffer(address, *args):
+    """/sensorX/calbuffer <n> — the deadband before proximity registers.
+
+    This is the one range control that can't be done in Max: it decides how far
+    below idle the baseline sits, so it reaches signal a gain never could.
+    trigger_threshold is recomputed from the stored raw_idle immediately, so
+    the change takes effect without a recalibration.
+    """
+    try:
+        i = int(address.split('/')[1].replace('sensor', ''))
+        if not (0 <= i <= 11) or not args:
+            return
+        buf = int(args[0])
+        CALIBRATION_BUFFERS[i] = buf
+        if RAW_IDLE[i] is not None:
+            RAW_MAX[i] = max(int(RAW_IDLE[i] - buf), 0)
+        # Write the per-sensor key (which wins on load) AND the array entry, so
+        # the file never shows two different numbers for the same thing.
+        arr = None
+        try:
+            with config_lock:
+                with open(CONFIG_FILE) as f:
+                    arr = json.load(f).get("calibration_buffers")
+        except Exception:
+            pass
+        if not isinstance(arr, list) or len(arr) < 12:
+            arr = [2] * 12
+        arr[i] = buf
+        _merge_config({f"sensor_{i}": {"calibration_buffer": buf,
+                                       "trigger_threshold": int(RAW_MAX[i])},
+                       "calibration_buffers": arr})
+        print(f"\U0001f4e5 OSC: sensor_{i} calibration_buffer = {buf} "
+              f"-> trigger_threshold {RAW_MAX[i]}")
+    except Exception as e:
+        print(f"\u26a0 Error handling {address}: {e}")
+
+
+def handle_shutdown(address, *args):
+    """/shutdown — power this node down. One broadcast ends the night."""
+    print("\U0001f4e5 OSC: shutdown requested")
+    os.system("sudo poweroff")
+
+
+def handle_proxdelta(address, *args):
+    """/proxdelta <float> — node-level proximity scaling.
+
+    proximity = (baseline - raw) / PROXIMITY_MAX_DELTA * 100, so this is the
+    per-node balance control: long rods produce smaller deltas and want a
+    smaller divisor than short ones. Global feel belongs in Max; this is what
+    keeps the eight rods reading alike as a starting point.
+    """
+    global PROXIMITY_MAX_DELTA
+    try:
+        if not args:
+            return
+        v = float(args[0])
+        if v <= 0:
+            print(f"\u26a0 {address}: must be > 0")
+            return
+        PROXIMITY_MAX_DELTA = v
+        _merge_config({"proximity_max_delta": v})
+        print(f"\U0001f4e5 OSC: proximity_max_delta = {v}")
+    except Exception as e:
+        print(f"\u26a0 Error handling {address}: {e}")
+
+
+def handle_calinterval(address, *args):
+    """/calinterval <hours> — 0 = startup only, N = recalibrate every N hours.
+
+    Set this to 0 before opening. An automatic recalibration that fires while
+    someone is standing at a column folds that body into the idle baseline,
+    and the column then reads near zero for an empty room — silently dead
+    until the next cycle.
+    """
+    global CALIBRATION_INTERVAL_HOURS
+    try:
+        if not args:
+            return
+        v = float(args[0])
+        CALIBRATION_INTERVAL_HOURS = v
+        _merge_config({"calibration_interval_hours": v})
+        print(f"\U0001f4e5 OSC: calibration_interval_hours = {v}"
+              + ("  (startup only)" if v == 0 else ""))
+    except Exception as e:
+        print(f"\u26a0 Error handling {address}: {e}")
+
+
 def start_osc_server():
     """Start OSC server for receiving control messages."""
     dispatcher = Dispatcher()
@@ -651,8 +810,14 @@ def start_osc_server():
         # Hardware thresholds
         dispatcher.map(f"/sensor{i}/hw_touch", handle_hw_touch)
         dispatcher.map(f"/sensor{i}/hw_release", handle_hw_release)
+        # Deadband: the one proximity-range control that can't live in Max
+        dispatcher.map(f"/sensor{i}/calbuffer", handle_cal_buffer)
 
     dispatcher.map("/recalibrate", handle_recalibrate)
+    dispatcher.map("/getconfig", handle_getconfig)
+    dispatcher.map("/proxdelta", handle_proxdelta)
+    dispatcher.map("/calinterval", handle_calinterval)
+    dispatcher.map("/shutdown", handle_shutdown)
 
     # Start server on port 57121 (different from SuperCollider's 57120)
     server = ThreadingOSCUDPServer(("0.0.0.0", 57121), dispatcher)
@@ -660,6 +825,11 @@ def start_osc_server():
     server_thread.start()
 
     print(f"🎛 OSC Control Server listening on port 57121")
+    print("   /getconfig [i]              - reply with current tuning")
+    print("   /sensorX/calbuffer <n>      - proximity deadband, recomputes threshold")
+    print("   /proxdelta <float>          - node proximity scaling")
+    print("   /calinterval <hours>        - 0 = startup only")
+    print("   /shutdown                   - power this node down")
     print("   Software thresholds:")
     print("     /sensorX/pressure <value>   - Max pressure point (e.g., /sensor9/pressure 45)")
     print("     /sensorX/trigger <value>    - Trigger threshold (e.g., /sensor9/trigger 90)")
